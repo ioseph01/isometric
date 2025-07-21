@@ -1,0 +1,353 @@
+import pygame
+import random
+from utils import sign, load_image
+
+pygame.init()
+WIDTH, HEIGHT = 21, 21
+TILE_WIDTH, TILE_HEIGHT = 20, 10
+WALL_HEIGHT = 4
+WALL_SPACING = 4
+sprite = "grass"
+SCREEN = pygame.display.set_mode((800, 600))
+display = pygame.Surface((200,150), pygame.SRCALPHA)
+pygame.display.set_caption("Isometric Maze with Stairs")
+mode = True
+NEIGHBORS = {(-1,0),(0,-1),(1,0),(0,1)}
+offset = [0,0]
+
+assets = {
+    'grass': load_image('cube.png'),
+    'ramp_right': load_image('ramp.png'),
+    'ramp_left': pygame.transform.flip(load_image('ramp.png'), True, False),
+    'wall': load_image('wall.png'),
+    'tile': load_image('trap.png')
+}
+
+
+import random
+
+NEIGHBORS = [(-1,0), (0,-1), (1,0), (0,1)]
+
+def sign(x):
+    if x > 0:
+        return 1
+    elif x < 0:
+        return -1
+    else:
+        return 0
+        
+
+
+def coord_add(a, b):
+    return (a[0] + b[0], a[1] + b[1])
+
+
+def carve(layout, stair_prob=0):
+    visited = set()
+    rows, cols = len(layout), len(layout[0])
+    toVisit = [(cols - 2, rows - 2)]  # Start with just the starting position
+    
+    def in_range(coord):
+        return 0 <= coord[0] < cols and 0 <= coord[1] < rows
+
+
+    def fill_room(start, z_val):
+        stack = [start]
+        seen = set()
+        while stack:
+            cx, cy = stack.pop()
+            if (cx, cy) in seen:
+                continue
+            seen.add((cx, cy))
+        
+            if in_range((cx, cy)) and layout[cy][cx] == ".":
+                layout[cy][cx] = z_val
+                for dx, dy in [(0,1), (1,0), (0,-1), (-1,0)]:
+                    nx, ny = cx + dx, cy + dy
+                    if in_range((nx, ny)):
+                        stack.append((nx, ny))
+                        
+        return seen
+
+    
+    visited.add(toVisit[-1])
+    layout[rows - 2][cols - 2] = 0  
+    max_z, z = 0,0
+    while toVisit:
+        x, y = toVisit[-1]
+        choices = []
+        
+        # Look for unvisited cells that are 2 steps away
+        for n in NEIGHBORS:
+            next_cell = coord_add((x, y), (n[0] * 2, n[1] * 2))
+            
+            if in_range(next_cell) and next_cell not in visited:
+                wall = coord_add((x, y), n)
+                choices.append((next_cell, wall))
+            elif in_range(next_cell):
+                z = layout[y][x]
+                
+        if choices:
+            # Choose a random direction to carve
+            next_cell, wall = random.choice(choices)
+            
+            # Add the new cell to visit stack
+            toVisit.append(next_cell)
+            
+            # Mark both the wall and the new cell as visited
+            visited.add(next_cell)
+            visited.add(wall)
+            
+
+            offset = 1 if next_cell[0] < x or next_cell[1] < y else -1
+            z = max(0, z + offset) if random.randint(0,100) < stair_prob and layout[next_cell[1]][next_cell[0]] != "." else z
+            offset = 1 if next_cell[0] < wall[0] or next_cell[1] < wall[1] else -1
+            z2 = max(0, z + offset) if random.randint(0,100) < stair_prob and layout[wall[1]][wall[0]] != "." else z
+            
+            if layout[wall[1]][wall[0]] == ".":
+                visited.update(fill_room(wall, z))
+            else:
+                layout[wall[1]][wall[0]] = z
+
+            if layout[next_cell[1]][next_cell[0]] == ".":
+                visited.update(fill_room(next_cell, z))
+            else:
+                layout[next_cell[1]][next_cell[0]] = z2
+
+        else:
+            # Dead end - backtrack
+            toVisit.pop()
+    
+    return layout
+
+
+
+  
+def fix_maze(maze):
+    nothing_to_change = True
+    for row_i, row in enumerate(maze):
+        for cell_i, cell in enumerate(row):
+            if cell is not None:
+                dirs = [(1,0,1),(0,1,1),(1,1,1),(2,0,3),(0,2,3)]
+                for d in dirs:
+                    if in_range([ cell_i + d[0], row_i + d[1] ], maze):
+                        to_check = maze[row_i + d[1]][cell_i + d[0]]
+                        if to_check != None:
+                            if to_check - cell >= d[2]:
+                                maze[row_i + d[1]][cell_i + d[0]] = max(0, cell)
+                                nothing_to_change = False
+                                
+    if nothing_to_change:
+        print("Nothing changed")
+    else:
+        print("Maze 'fixed")
+            
+    return maze
+
+def create_maze(width, height, stair_prob=0):
+    if width % 2 == 0:
+        width += 1
+    if height % 2 == 0:
+        height += 1
+    
+    return [[None for _ in range(width)] for _ in range(height)]
+    
+
+def print_maze(maze, spacing=""):
+    for x in range(len(maze[0])):
+        col = ""
+        for y in range(len(maze)):
+            if maze[y][x] is not None:
+                col += str(maze[y][x])
+            else:
+                col += "#"
+        print(col)
+    print(spacing, end="")
+
+
+def add_room(x, y, w, h, maze):
+    if x % 2 == 1 and y % 2 == 1 and w % 2 == 0 and h % 2 == 0:
+        if in_range((x, y), maze) and in_range((x + w, y + h), maze):
+            for i in range(h):
+                for j in range(w):
+                    maze[y + i][x + j] = "."
+                    
+        return maze
+
+
+def generate_rooms(maze, attempts=1):
+    rooms = []
+    for attempt in range(attempts):
+        x,y,w,h = random.randint(0,((len(maze[0]) - 3) // 2)) * 2 + 1, random.randint(0,(len(maze) - 3) // 2) * 2 + 1, random.randint(2, 6), random.randint(2,6)
+        print(x,y,w,h)
+        if x + w < len(maze[0]) - 2 and y + h < len(maze) - 2:
+            room = pygame.Rect(x,y,w,h)
+            for r in rooms:
+                if r.colliderect(room):
+                    break
+            else:
+                rooms.append(room)
+                add_room(x,y,w,h, maze)    
+               
+    return maze
+            
+            
+
+def to_iso(x, y, tile_w, tile_h):
+    # Fix the backwards rendering by swapping the x-y calculation
+    iso_x = (y - x) * tile_w // 2
+    iso_y = (x + y) * tile_h // 2
+    
+    # Use the same base position for both flat and tall tiles
+    return iso_x + 200, iso_y + 50
+
+def draw_block(screen, x, y, h, z=0, offset=(0,0), sprite=sprite):
+    iso_x, iso_y = to_iso(x, y, TILE_WIDTH, TILE_HEIGHT)
+    iso_y -= z * (TILE_HEIGHT // 2)  # Add this line!
+    for i in reversed(range(h)):
+        screen.blit(assets[sprite], (iso_x + offset[0], iso_y + offset[1] + WALL_SPACING * i))
+
+    
+
+def draw_map(screen, layout, offset=(0,0)):
+    tiles_to_draw = []
+    rows = len(layout)
+    cols = len(layout[0])
+    
+    for y in range(rows):
+        for x in range(cols):
+            tile = layout[y][x]
+            if tile is not None:
+                tiles_to_draw.append((x + y, x, y, tile))  # z affects depth
+
+                # tiles_to_draw.append((x, y, tile))
+    
+    tiles_to_draw.sort()
+    
+    for _, x, y, z in tiles_to_draw:
+        draw_block(screen, x, y, WALL_HEIGHT, z, offset)
+        
+
+def in_range(pos, maze):
+    return 0 <= pos[0] < len(maze[0]) and 0 <= pos[1] < len(maze)
+
+def render(player=None, offset=(0,0)):
+    display.fill((40, 0, 40))
+    draw_map(display, maze, offset=offset)
+    if player is not None:
+        draw_block(display, player[0], player[1], 1, maze[player[1]][player[0]], offset=[offset[0], offset[1]], sprite="tile")
+        # pos = to_iso(*player, TILE_WIDTH, TILE_HEIGHT)
+        # display.blit(assets['grass'], [pos[0], pos[1] + WALL_HEIGHT * 14])
+    pygame.transform.scale(display, SCREEN.get_size(), SCREEN)
+    pygame.display.flip()
+    
+
+def border_check(maze, player, direction):
+    if direction == [0,0]:
+        return player, [0,0]
+    sign_ = sign(direction[0]) if sign(direction[0]) != 0 else sign(direction[1]) 
+    pos = [player[0] + direction[0], player[1] + direction[1]]
+    locs = [10000,*player]
+    diff = [0,0]
+    for i in range(2):
+        if in_range((pos[0], pos[1]), maze):
+            if maze[pos[1]][pos[0]] is not None:
+                tile = maze[player[1]][player[0]]
+                ix, iy = to_iso(player[0], player[1], TILE_WIDTH, TILE_HEIGHT)
+                iy -= tile * (TILE_HEIGHT // 2)
+                
+                new_tile = maze[pos[1]][pos[0]]
+                i_x, i_y = to_iso(pos[0], pos[1], TILE_WIDTH, TILE_HEIGHT)
+                i_y -= new_tile * (TILE_HEIGHT // 2)
+                
+                dx, dy = abs(ix - i_x), abs(iy - i_y)
+                
+                if dx <= 10 and dy <= 10 and dx + dy + abs(new_tile - tile) < locs[0] and i >= abs(new_tile - tile) - 1:
+                    locs = [dx + dy + abs(new_tile - tile), *pos]
+                    diff = [i_x - ix, i_y - iy]
+            pos = [pos[0] + sign_, pos[1] + sign_]
+            
+    return locs[1:], diff
+        
+
+
+# Create maze with room areas that will be flat
+maze = create_maze(21,21)
+maze = carve(generate_rooms(maze, 20), stair_prob=15)
+
+print_maze(maze, "\n ==================================================== \n")
+
+render_scroll = [-105,20]
+player = [1,1]
+# Z = maze[player[1]][player[0]]
+# ------------- Game Loop -------------
+clock = pygame.time.Clock()
+running = True
+movement = [False, False, False, False]
+
+
+while running:
+    
+    new_player, diff = border_check(maze, player, [movement[1] - movement[3], movement[0] - movement[2]])
+    # render_scroll[0] -= sum(movement)
+    render_scroll[1] -= diff[1]
+    render_scroll[0] -= diff[0]
+    player = new_player
+        
+    render(offset=render_scroll, player=player)
+    
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+        if event.type == pygame.KEYDOWN:
+            
+            if event.key == pygame.K_SPACE:
+                player = [1,1]
+                fix_maze(maze)
+                print_maze(maze, "\n=====================================\n")
+
+            if event.key == pygame.K_UP:
+                render_scroll[1] += 10
+            elif event.key == pygame.K_DOWN:
+                render_scroll[1] -= 10
+            elif event.key == pygame.K_RIGHT:
+                render_scroll[0] -= 10
+            elif event.key == pygame.K_LEFT:
+                render_scroll[0] += 10
+            elif event.key == pygame.K_SPACE:
+                mode = not mode
+              
+            if event.key == pygame.K_w:
+                movement[2] = True
+            if event.key == pygame.K_d:
+                movement[3] = True
+            if event.key == pygame.K_s:
+                movement[0] = True
+            if event.key == pygame.K_a:
+                movement[1] = True
+            if event.key == pygame.K_r:
+                WALL_SPACING = (WALL_SPACING + 1) % 46
+                print(player)
+                
+        if event.type == pygame.KEYUP:
+            if event.key == pygame.K_w:
+                movement[2] = False
+            if event.key == pygame.K_d:
+                movement[3] = False
+            if event.key == pygame.K_s:
+                movement[0] = False
+            if event.key == pygame.K_a:
+                movement[1] = False
+            
+            
+            tile = maze[player[1]][player[0]]
+            ix, iy = to_iso(player[0], player[1], TILE_WIDTH, TILE_HEIGHT)
+            iy -= tile * (TILE_HEIGHT // 2)
+            # print("->", ix, iy, tile)
+            if event.key in [pygame.K_q,pygame.K_ESCAPE]:
+                running = False
+    
+
+    clock.tick(10)
+
+pygame.quit()
