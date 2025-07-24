@@ -16,11 +16,11 @@ NEIGHBORS = {(-1,0),(0,-1),(1,0),(0,1)}
 offset = [0,0]
 
 assets = {
-    'grass': load_image('cube.png'),
+    'grass': load_image('block.png'),
     'ramp_right': load_image('ramp.png'),
     'ramp_left': pygame.transform.flip(load_image('ramp.png'), True, False),
     'wall': load_image('wall.png'),
-    'tile': load_image('trap.png')
+    'tile': load_image('player2.png')
 }
 
 
@@ -45,7 +45,7 @@ def coord_add(a, b):
 def carve(layout, stair_prob=0):
     visited = set()
     rows, cols = len(layout), len(layout[0])
-    toVisit = [(cols - 2, rows - 2)]  # Start with just the starting position
+    toVisit = [(1,1), (cols - 2, rows - 2)]  # Start with just the starting position
     
     def in_range(coord):
         return 0 <= coord[0] < cols and 0 <= coord[1] < rows
@@ -231,13 +231,15 @@ def draw_map(screen, layout, offset=(0,0)):
 def in_range(pos, maze):
     return 0 <= pos[0] < len(maze[0]) and 0 <= pos[1] < len(maze)
 
-def render(player=None, offset=(0,0)):
+def render(player=None, offset=(0,0), entities=[]):
     display.fill((40, 0, 40))
     draw_map(display, maze, offset=offset)
     if player is not None:
-        draw_block(display, player[0], player[1], 1, maze[player[1]][player[0]], offset=[offset[0], offset[1]], sprite="tile")
+        draw_block(display, player[0], player[1], 1, maze[player[1]][player[0]], offset=[offset[0], offset[1] - 12], sprite="tile")
         # pos = to_iso(*player, TILE_WIDTH, TILE_HEIGHT)
         # display.blit(assets['grass'], [pos[0], pos[1] + WALL_HEIGHT * 14])
+    for e in entities:
+        draw_block(display, e[0], e[1], 1, maze[e[1]][e[0]], offset=[offset[0], offset[1] - 12], sprite="tile")
     pygame.transform.scale(display, SCREEN.get_size(), SCREEN)
     pygame.display.flip()
     
@@ -246,6 +248,10 @@ def border_check(maze, player, direction):
     if direction == [0,0]:
         return player, [0,0]
     sign_ = sign(direction[0]) if sign(direction[0]) != 0 else sign(direction[1]) 
+    if abs(direction[0]) == 2 or abs(direction[1]) == 2:
+        direction = [direction[0] - sign_, direction[1] - sign_]
+    elif abs(direction[0]) == 1 and abs(direction[1]) == 1:
+        direction = random.choice(([direction[0], 0],[0,direction[1]]))
     pos = [player[0] + direction[0], player[1] + direction[1]]
     locs = [10000,*player]
     diff = [0,0]
@@ -270,42 +276,124 @@ def border_check(maze, player, direction):
     return locs[1:], diff
         
 
+def trace(player, target, maze):
+        
+    x,y = player
+    target_x, target_y = target
+    
+    visited = {(x, y)}
+    paths = [[(x, y)]]
+    
+    if player == target:
+        return player
+        
+    while len(paths) > 0 :
+            
+        current = paths.pop(-1)
+        x, y = current[-1]
+            
+        if x == target_x and y == target_y:
+            return current
+            
+        visited.add((x, y))
+        toAdd = {}
+            
+        dirs = [(-1,0,range(2)),(1,0,range(-1,1)),(0,1,range(-1,1)),(0,-1,range(2)),(2,1,range(1,3)),(1,2,range(1,3)),(-2,-1,range(-2,0)),(-1,-2,range(-2,0))]
+        # dirs = [(-1,0,range(2)),(1,0,range(-1,1)),(0,1,range(-1,1)),(0,-1,range(2))]
+        # dirs = [(-1,0,1),(0,-1,1),(0,1,1),(1,0,1)]
+        
+        for dx,dy,dz in dirs:
+            if in_range((x + dx, y + dy), maze) and (x + dx, y + dy) not in visited:
+                cell = maze[y + dy][x + dx]
+                if cell != None:
+                    if cell - maze[y][x] in dz:
+                        # k = sign(dx) if dx != 0 else sign(dy)
+                        k = abs(target_x - x - dx) + abs(target_y - y - dy)
+                        if k not in toAdd:
+                            toAdd[k] = []
+                        toAdd[k].append((x + dx, y + dy))
 
-# Create maze with room areas that will be flat
+        
+        for key in reversed(dict(sorted(toAdd.items()))):
+            for val in random.sample(toAdd[key], len(toAdd[key])):
+                paths.append(current + [val])
+     
+    print(current)
+
+
+def combine(layout, other, sparsity):
+
+    for y in range(1, len(maze) - 1):
+        for x in range(1, len(layout[y]) - 1):
+                
+            if (layout[y][x] is None or None is other[y][x]) and random.randint(0,100) < sparsity[0]:
+                layout[y][x] = layout[y][x] if layout[y][x] is not None else other[y][x]
+
+            if  random.randint(0, 100 ) < sparsity[1] and x != 0 and x != len(layout[0]) - 1 and y != 0 and y != len(layout) - 1 and x % 2 != 1 and y % 2 != 1:
+                layout[y][x] = layout[y][x - 1]
+    
+    return layout
+
 maze = create_maze(21,21)
 maze = carve(generate_rooms(maze, 20), stair_prob=15)
-
+# maze = carve(maze, stair_prob=15)
+maze = combine(maze, carve(create_maze(21,21),10), (0,10))
+maze = fix_maze(maze)
 print_maze(maze, "\n ==================================================== \n")
 
 render_scroll = [-105,20]
 player = [1,1]
+entity = [19,19]
+entity_path = []
+path = []
 # Z = maze[player[1]][player[0]]
 # ------------- Game Loop -------------
 clock = pygame.time.Clock()
 running = True
 movement = [False, False, False, False]
-
+tick = [0,60]
 
 while running:
-    
-    new_player, diff = border_check(maze, player, [movement[1] - movement[3], movement[0] - movement[2]])
-    # render_scroll[0] -= sum(movement)
-    render_scroll[1] -= diff[1]
-    render_scroll[0] -= diff[0]
-    player = new_player
+    tick[0] = (tick[0] + 1) % tick[1]
+    diff = render_scroll
+    if tick[0] % 5 == 0:
         
-    render(offset=render_scroll, player=player)
+        if path == [] or path is None:
+            new_player, diff = border_check(maze, player, [movement[1] - movement[3], movement[0] - movement[2]])
+
+        else:
+            next_coord = path.pop(0)
+            print(next_coord, maze[next_coord[1]][next_coord[0]])
+            new_player, diff = border_check(maze, player, [next_coord[0] - player[0], next_coord[1] - player[1]])
+        
+        render_scroll[1] -= diff[1]
+        render_scroll[0] -= diff[0]
+        player = new_player
+    
+        
+    if entity_path == [] or entity_path is None:
+        entity_path = trace(entity, player, maze)
+    elif tick[0] % 15 == 0:
+        entity = entity_path.pop(0)
+
+    
+        
+    render(offset=render_scroll, player=player, entities=[entity])
     
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
         if event.type == pygame.KEYDOWN:
             
+            if event.key == pygame.K_t:
+                print(path := trace(player, (19,19), maze))
+                
             if event.key == pygame.K_SPACE:
                 player = [1,1]
                 fix_maze(maze)
                 print_maze(maze, "\n=====================================\n")
-
+                render_scroll = [-105,20]
+                
             if event.key == pygame.K_UP:
                 render_scroll[1] += 10
             elif event.key == pygame.K_DOWN:
@@ -319,11 +407,11 @@ while running:
               
             if event.key == pygame.K_w:
                 movement[2] = True
-            if event.key == pygame.K_d:
+            elif event.key == pygame.K_d:
                 movement[3] = True
-            if event.key == pygame.K_s:
+            elif event.key == pygame.K_s:
                 movement[0] = True
-            if event.key == pygame.K_a:
+            elif event.key == pygame.K_a:
                 movement[1] = True
             if event.key == pygame.K_r:
                 WALL_SPACING = (WALL_SPACING + 1) % 46
@@ -348,6 +436,6 @@ while running:
                 running = False
     
 
-    clock.tick(10)
+    clock.tick(60)
 
 pygame.quit()
