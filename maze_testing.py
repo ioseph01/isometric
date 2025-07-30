@@ -1,4 +1,3 @@
-import enum
 import pygame
 import random
 from structures import Elevator, Tile
@@ -295,7 +294,7 @@ def render(maze, player=None, offset=(0,0), entities=[]):
         tile = maze[player[1]][player[0]]
         if isinstance(tile, Elevator):
             if tile.time_stopped <= 0:
-                dz = tile.direction
+                dz = .5 * tile.direction
         
         draw_block(display, player[0], player[1], 1, tile.z, offset=[offset[0], offset[1] - 12], sprite="tile")
         # pos = to_iso(*player, TILE_WIDTH, TILE_HEIGHT)
@@ -310,8 +309,9 @@ def render(maze, player=None, offset=(0,0), entities=[]):
 
 def border_check(maze, player, direction):
     if direction == [0,0]:
-        return player, [0,0]
-    elif isinstance(maze[player[1]][player[0]], Elevator):
+        if maze[player[1]][player[0]].type == 'Tile':
+            return player, [0,0]
+    elif maze[player[1]][player[0]].type == 'Elevator':
         if maze[player[1]][player[0]].time_stopped >= 50:
             return player,[0,0]
             
@@ -326,14 +326,14 @@ def border_check(maze, player, direction):
     for i in range(2):
         if in_range((pos[0], pos[1]), maze):
             if maze[pos[1]][pos[0]] is not None:
-                tile = maze[player[1]][player[0]].current_z if isinstance(maze[player[1]][player[0]], Elevator) else maze[player[1]][player[0]].z
+                tile = maze[player[1]][player[0]].z
                 ix, iy = to_iso(player[0], player[1], TILE_WIDTH, TILE_HEIGHT)
                 iy -= tile * (TILE_HEIGHT // 2)
                 
-                if isinstance(maze[pos[1]][pos[0]], Elevator):
+                if maze[pos[1]][pos[0]].type == 'Elevator':
                     if maze[pos[1]][pos[0]].time_stopped <= 10:
                         continue
-                new_tile = maze[pos[1]][pos[0]].current_z if isinstance(maze[pos[1]][pos[0]], Elevator) else maze[pos[1]][pos[0]].z
+                new_tile = maze[pos[1]][pos[0]].z
                 i_x, i_y = to_iso(pos[0], pos[1], TILE_WIDTH, TILE_HEIGHT)
                 i_y -= new_tile * (TILE_HEIGHT // 2)
                 
@@ -343,57 +343,88 @@ def border_check(maze, player, direction):
                     locs = [dx + dy + abs(new_tile - tile), *pos]
                     diff = [i_x - ix, i_y - iy]
             pos = [pos[0] + sign_, pos[1] + sign_]
-           
+    if abs(int(diff[0])) > 10:
+        print(maze[player[1]][player[0]].type, "HEYYY")
     return locs[1:], diff
         
+
 
 def trace(player, target, maze):
         
     x,y = player
     target_x, target_y = target
     
-    visited = {(x, y)}
-    paths = [[(x, y)]]
-    
+    if maze[y][x].type == 'Tile':
+        visited = {(x, y, maze[y][x].z)}
+        paths = [[(x, y, maze[y][x].z)]]
+    else:
+        visited = {(x, y, maze[y][x].z1)}
+        paths = [[(x, y, maze[y][x].z1)]]
+        visited.add((x, y, maze[y][x].z2))
+        paths += [[(x, y, maze[y][x].z2)]]
+        
     if player == target:
-        return player
+        return [(player)]
         
     while len(paths) > 0 :
             
         current = paths.pop(-1)
-        x, y = current[-1]
+        x, y, z = current[-1]
             
         if x == target_x and y == target_y:
             return current
             
-        visited.add((x, y))
+        visited.add((x, y, z))
+            
         toAdd = {}
             
         dirs = [(-1,0,range(2)),(1,0,range(-1,1)),(0,1,range(-1,1)),(0,-1,range(2)),(2,1,range(1,3)),(1,2,range(1,3)),(-2,-1,range(-2,0)),(-1,-2,range(-2,0))]
-        
         for dx,dy,dz in dirs:
-            if in_range((x + dx, y + dy), maze) and (x + dx, y + dy) not in visited:
+            if in_range((x + dx, y + dy), maze):
                 cell = maze[y + dy][x + dx]
+
                 if cell != None:
-                    if isinstance(cell, Tile) and isinstance(maze[y][x], Tile):
-                        if cell.z - maze[y][x].z not in dz:
+                    if cell.type == 'Tile' and maze[y][x].type == 'Tile':
+                        if cell.z - maze[y][x].z not in dz or (x + dx, y + dy, cell.z) in visited:
                             continue
-                    elif isinstance(cell, Tile) and isinstance(maze[y][x], Elevator):
-                        if cell.z - maze[y][x].z not in dz and cell.z - maze[y][x].z2 not in dz:
+                    elif cell.type == 'Tile' and maze[y][x].type == 'Elevator':
+                        closer_z = maze[y][x].z1 if abs(maze[y][x].z1 - cell.z) < abs(maze[y][x].z2 - cell.z) else maze[y][x].z2
+                        if (cell.z - z not in dz) or (x + dx, y + dy, closer_z) in visited:
                             continue
-                    elif isinstance(cell, Elevator):
-                        if cell.z2 - maze[y][x].z not in dz and cell.z2 - maze[y][x].z not in dz:
+                    elif cell.type == 'Elevator':
+                        closer_z = cell.z1 if abs(maze[y][x].z - cell.z1) < abs(maze[y][x].z - cell.z2) else cell.z2
+                        if (cell.z2 - maze[y][x].z not in dz and cell.z1 - maze[y][x].z not in dz) or (x + dx, y + dy, closer_z) in visited:
                             continue
                     # k = sign(dx) if dx != 0 else sign(dy)
                     k = abs(target_x - x - dx) + abs(target_y - y - dy)
                     if k not in toAdd:
                         toAdd[k] = []
-                    toAdd[k].append((x + dx, y + dy))
-
-        
+                    if cell.type == 'Elevator':
+                        closer_z = cell.z1 if abs(maze[y][x].z - cell.z1) < abs(maze[y][x].z - cell.z2) else cell.z2
+                        toAdd[k].append((x + dx, y + dy, closer_z))
+                    elif cell.type == 'Tile':
+                        toAdd[k].append((x + dx, y + dy, cell.z))
+                        
+        if maze[y][x].type == 'Elevator':
+            if z == maze[y][x].z1:
+                
+                k = abs(target_x - x - 1) + abs(target_y - y - 1)
+                if k not in toAdd:
+                    toAdd[k] = [(x,y,maze[y][x].z2)]
+                else:
+                    toAdd[k].append((x,y,maze[y][x].z2))
+            elif z == maze[y][x].z2:
+                k = abs(target_x - x + 1) + abs(target_y - y + 1)
+                if k not in toAdd:
+                    toAdd[k] = [(x,y,maze[y][x].z1)]
+                else:
+                    toAdd[k].append((x,y,maze[y][x].z1))
+                    
+                    
         for key in reversed(dict(sorted(toAdd.items()))):
             for val in random.sample(toAdd[key], len(toAdd[key])):
-                paths.append(current + [val])
+                if val not in visited:
+                    paths.append(current + [val])
      
 
 
@@ -415,6 +446,24 @@ def combine(layout, other, sparsity):
                         break
     
     return layout
+
+
+def test(maze, display):
+    # Get player's world position
+    player_x, player_y = 1, 1
+    player_z = maze[1][1].z  # or however you access the z value
+
+    # Calculate where the player would appear on screen without any scrolling
+    player_screen_x, player_screen_y = to_iso(player_x, player_y, TILE_WIDTH, TILE_HEIGHT)
+    player_screen_y -= player_z * (TILE_HEIGHT // 2)  # Account for height
+
+    # Calculate the center of your display surface
+    center_x = display.get_width() // 2   # 100 for your 200px wide surface
+    center_y = display.get_height() // 2  # 75 for your 150px tall surface
+
+    # Set render_scroll to move the player to the center
+    return [center_x - player_screen_x, center_y - player_screen_y]
+    
 
 ###############################################################################################################################################################
 ###############################################################################################################################################################
@@ -442,19 +491,21 @@ tick = [0,60]
 render_scroll = to_iso(player[0],player[1], TILE_WIDTH, TILE_HEIGHT)
 render_scroll = [-1 * render_scroll[0] // 2, render_scroll[1]]
 
-
 while running:
     tick[0] = (tick[0] + 1) % tick[1]
-    diff = render_scroll
+    diff = [0,0]
     if tick[0] % 5 == 0:
         
         if path == [] or path is None:
             new_player, diff = border_check(maze, player, [movement[1] - movement[3], movement[0] - movement[2]])
 
         else:
-            next_coord = path.pop(0)
-            print(next_coord, maze[next_coord[1]][next_coord[0]].z)
-            new_player, diff = border_check(maze, player, [next_coord[0] - player[0], next_coord[1] - player[1]])
+            next_coord = path[0]
+            if (maze[next_coord[1]][next_coord[0]].z == next_coord[2]):
+                new_player, diff = border_check(maze, player, [next_coord[0] - player[0], next_coord[1] - player[1]])
+                if  [next_coord[0], next_coord[1]] == player:
+                    # print(path[0])
+                    path.pop(0)
         # print(diff)
         render_scroll[1] -= diff[1]
         render_scroll[0] -= diff[0]
@@ -465,7 +516,6 @@ while running:
     #     entity_path = trace(entity, player, maze)
     # elif tick[0] % 5 == 0:
     #     entity = entity_path.pop(0)
-
     
         
     render_scroll[1] += render(maze, offset=render_scroll, player=player, entities=[entity])
@@ -477,13 +527,28 @@ while running:
             if event.key == pygame.K_e:
                 add_elevators(maze, probability=100)
             if event.key == pygame.K_c:
+                    
                     maze = create_maze(21,21)
                     maze = carve(generate_rooms(maze, 100), stair_prob=100)
                     # maze = carve(maze, stair_prob=15)
                     maze = combine(maze, carve(create_maze(21,21), 0), (10,50))
                     player = [1,1]
-                    render_scroll = to_iso(player[0],player[1], TILE_WIDTH, TILE_HEIGHT)
-                    render_scroll = [-1 * render_scroll[0] // 2, render_scroll[1]]
+                    render_scroll = test(maze, display)
+                    print(render_scroll, "pos player")
+                    
+                        
+                    path = []
+                    
+            if event.key == pygame.K_b:
+                    
+                    maze = create_maze(21,21)
+                    maze = carve(generate_rooms(maze, random.randint(0,10)), stair_prob=random.randint(-20,100))
+                    maze = combine(maze, carve(create_maze(21,21), 0), (random.randint(0,100),random.randint(0,100)))
+                    player = [1,1]
+                    render_scroll = test(maze, display)
+                    print(render_scroll, "pos player")
+                    
+                        
                     path = []
                     
             if event.key == pygame.K_t:
@@ -493,17 +558,24 @@ while running:
                 player = [1,1]
                 fix_maze(maze)
                 print_maze(maze, "\n=====================================\n")
-                render_scroll = to_iso(player[0],player[1], TILE_WIDTH, TILE_HEIGHT)
-                render_scroll = [-1 * render_scroll[0] // 2, render_scroll[1]]
+                render_scroll = test(maze, display)
+                print(render_scroll)
                 
             if event.key == pygame.K_UP:
                 render_scroll[1] += 10
+                print(render_scroll)
+                
             elif event.key == pygame.K_DOWN:
                 render_scroll[1] -= 10
+                print(render_scroll)
+                
             elif event.key == pygame.K_RIGHT:
                 render_scroll[0] -= 10
+                print(render_scroll)
+                
             elif event.key == pygame.K_LEFT:
                 render_scroll[0] += 10
+                print(render_scroll)
             elif event.key == pygame.K_SPACE:
                 mode = not mode
               
