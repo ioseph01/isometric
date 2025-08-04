@@ -18,23 +18,36 @@ class Tile:
     def __lt__(self, other):
         return self.z < other.z
     
+    @property
+    def type(self):
+        return "Tile"
 
-
+    @property
+    def z1(self):
+        return self.pos
 
 class Elevator(Tile):
     def __init__(self, game, z, sprite, other_z):
-        super().__init__(game, z, sprite)
-        self.z2 = other_z
+        super().__init__(game, int(z), sprite)
+        self.z2 = int(other_z)
         self.current_z = z
         self.direction = -1
         self.time_stopped = 0
         
-        def __bool__(self): # returns if stopped
-            return self.time_stopped <= 0
+    def __bool__(self): # returns if stopped
+        return self.time_stopped <= 0
         
+    @property
+    def type(self):
+        return "Elevator"
+    
     @property
     def z(self):
         return self.current_z
+        
+    @property
+    def z1(self):
+        return self.pos
 
     def update(self):
         if self.time_stopped <= 0:
