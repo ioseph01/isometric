@@ -23,7 +23,7 @@ assets = {
     'ramp_right': load_image('ramp.png'),
     'ramp_left': pygame.transform.flip(load_image('ramp.png'), True, False),
     'wall': load_image('wall.png'),
-    'tile': load_image('player2.png')
+    'tile': load_image('gem.png')
 }
 
 
@@ -190,7 +190,7 @@ def fix_maze(maze):
             
     return maze
 
-def add_elevators(maze, probability=5):
+def add_elevators(maze, probability=80):
     if probability <= 0:
         return
     
@@ -210,7 +210,7 @@ def add_elevators(maze, probability=5):
                         if isinstance(maze[row_i + dy][cell_i + dx], Elevator):
                             break
                 else:
-                    if maze[row_i][cell_i + 1] is not None or maze[row_i + 1][cell_i] is not None and (maze[row_i][cell_i - 1] is not None or maze[row_i - 1][cell_i]):
+                    if (maze[row_i][cell_i + 1] is not None or maze[row_i + 1][cell_i] is not None) and (maze[row_i][cell_i - 1] is not None or maze[row_i - 1][cell_i]):
                         
                         other = higher(maze[row_i][cell_i + 1], maze[row_i + 1][cell_i])
                         if cell.z - other.z >= 2 and probability > random.randint(0,100):
@@ -321,7 +321,7 @@ def render(maze, player=None, offset=(0,0), entities=[]):
             if tile.time_stopped <= 0:
                 dz = .5 * tile.direction
         
-        draw_block(display, player[0], player[1], 1, tile.z, offset=[offset[0], offset[1] - 12], sprite="tile")
+        draw_block(display, player[0], player[1], 1, tile.z, offset=[offset[0], offset[1]], sprite="tile")
         # pos = to_iso(*player, TILE_WIDTH, TILE_HEIGHT)
         # display.blit(assets['grass'], [pos[0], pos[1] + WALL_HEIGHT * 14])
     for e in entities:
@@ -454,8 +454,7 @@ def trace(player, target, maze):
 
 
 def combine(layout, other, sparsity):
-
-    for y in range(1, len(maze) - 1):
+    for y in range(1, len(other) - 1):
         for x in range(1, len(layout[y]) - 1):
                 
             if (layout[y][x] is None or None is other[y][x]) and random.randint(0,100) < sparsity[0]:
@@ -488,8 +487,25 @@ def test(maze, display):
 
     # Set render_scroll to move the player to the center
     return [center_x - player_screen_x, center_y - player_screen_y]
-    
 
+
+def reset():
+    w,h = random.randint(3,11) * 2 + 1, random.randint(3,11) * 2 + 1
+    maze = create_maze(w,h)
+    maze = carve(generate_rooms(maze, random.randint(0,10)), stair_prob=random.randint(-20,100))
+    other = carve(create_maze(w,h),0)
+    print("RESET", len(maze), len(maze[0]), len(other), len(other[0]))
+    maze = combine(maze, other, (random.randint(0,100),random.randint(0,100)))
+    fix_maze(maze)
+    player = [1,1]
+    print_maze(maze)
+    render_scroll = test(maze, display)
+    path = trace(player, (w - 2, h - 2), maze)
+    if path is None or path == []:
+        add_elevators(maze, 100)
+        path = trace(player, (w - 2, h - 2), maze)
+
+    return {'w': w, 'h': h, 'maze': maze, 'player': player, 'scroll': render_scroll, 'path': path}
 ###############################################################################################################################################################
 ###############################################################################################################################################################
 ###############################################################################################################################################################
@@ -526,17 +542,27 @@ while running:
 
         else:
             next_coord = path[0]
-            if (maze[next_coord[1]][next_coord[0]].z == next_coord[2]):
+            cell, next_cell = maze[player[1]][player[0]], maze[next_coord[1]][next_coord[0]]
+            if next_cell.z == next_coord[2]:
                 new_player, diff = border_check(maze, player, [next_coord[0] - player[0], next_coord[1] - player[1]])
-                if  maze[player[1]][player[0]].type == 'Tile' or (diff[1] == 0 and float == type(diff[1]) ):
+                print(next_coord, new_player, maze[next_coord[1]][next_coord[0]].type, diff)
+                
+                # if (cell.type == 'Tile' or next_cell.type == 'Tile' and diff[:2] != [0,0]) or (type(diff[1]) == float):
+                if list(next_coord[:2]) == new_player:
                     path.pop(0)
-                print(next_coord, maze[next_coord[1]][next_coord[0]].type)
         # print(diff)
         render_scroll[1] -= diff[1]
         render_scroll[0] -= diff[0]
         player = new_player
     
-        
+    if player == [WIDTH - 2, HEIGHT - 2] and tick[0] == 0:
+        r = reset()
+        WIDTH = r['w']
+        HEIGHT = r['h']
+        maze = r['maze']
+        player = r['player']
+        render_scroll = r['scroll']
+        path = r['path']
     # if entity_path == [] or entity_path is None:
     #     entity_path = trace(entity, player, maze)
     # elif tick[0] % 5 == 0:
@@ -564,18 +590,23 @@ while running:
                     path = []
 
             if event.key == pygame.K_b:
-                for i in range(1000):    
+                for i in range(100):
                     WIDTH, HEIGHT = random.randint(3,10) * 2 + 1, random.randint(3,10) * 2 + 1
                     print(WIDTH,HEIGHT)
                     maze = create_maze(WIDTH, HEIGHT)
                     maze = carve(generate_rooms(maze, random.randint(0,10)), stair_prob=random.randint(-20,100))
                     maze = combine(maze, carve(create_maze(WIDTH,HEIGHT), 0), (random.randint(0,100),random.randint(0,100)))
+                    fix_maze(maze)
                     player = [1,1]
                     print_maze(maze)
                     render_scroll = test(maze, display)
                     print(render_scroll, "pos player")
-                    path = []
-                    continue
+                    path = trace(player, (WIDTH - 2, HEIGHT - 2), maze)
+                    if (path is None):
+                        print("ATTEMPT", i + 1, '#')
+                        break
+                    
+                continue
 
             if event.key == pygame.K_t:
                 print(path := trace(player, (WIDTH - 2, HEIGHT - 2), maze))
