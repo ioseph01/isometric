@@ -1,14 +1,14 @@
 import pygame
 import random
 from structures import Elevator, Tile
-from utils import sign, load_image
+from utils import cell_type, cell_valid, sign, load_image
 
 pygame.init()
 WIDTH, HEIGHT = 21, 21
 TILE_WIDTH, TILE_HEIGHT = 20, 10
 WALL_HEIGHT = 4
 WALL_SPACING = 4
-sprite = "grass"
+sprite = "block"
 SCREEN = pygame.display.set_mode((800, 600))
 display = pygame.Surface((200,150), pygame.SRCALPHA)
 display = pygame.Surface((400,300), pygame.SRCALPHA)
@@ -18,7 +18,13 @@ NEIGHBORS = {(-1,0),(0,-1),(1,0),(0,1)}
 offset = [0,0]
 
 assets = {
-    'grass': load_image('block.png'),
+    'elevator': load_image('elevator1.png'),
+    'block': load_image('block.png'),
+    'block1': load_image('block1.png'),
+    'block2': load_image('block2.png'),
+    'block3': load_image('block3.png'),
+    'block4': load_image('block4.png'),
+    'block5': load_image('block5.png'),
     'entity': load_image('ball.png'),
     'ramp_right': load_image('ramp.png'),
     'ramp_left': pygame.transform.flip(load_image('ramp.png'), True, False),
@@ -156,10 +162,6 @@ def fix_maze(maze):
     for row_i, row in enumerate(maze):
         for cell_i, cell in enumerate(row):
             if cell is not None:
-                '''
-                MAYBE DO y = x + 1; x = y + 1
-                if in_range()
-                '''
                 for dx in range(-1,100):
                     
                     dy = dx + 1 if dx > -1 else 1
@@ -194,28 +196,39 @@ def add_elevators(maze, probability=80):
     if probability <= 0:
         return
     
-    def higher(a,b):
-        if a is None:
-            return b
-        elif b is None:
-            return a
-        return max(a,b)
+    def check(a,b, tile_type, comparator=max):
+        coords = []
+        if cell_type(a, maze, tile_type):
+            coords.append(maze[a[1]][a[0]])
+        if cell_type(b, maze, tile_type):
+            coords.append(maze[b[1]][b[0]])
+        if len(coords) <= 0:
+            return None
+        return comparator(coords)
 
     for row_i, row in enumerate(maze):
         for cell_i, cell in enumerate(row):
             
             if cell is not None:
+                if cell.type == 'Elevator':
+                    continue
                 for dx, dy in NEIGHBORS:
                     if in_range([cell_i + dx, row_i + dy], maze):
-                        if isinstance(maze[row_i + dy][cell_i + dx], Elevator):
+                        if cell_type((cell_i + dx, row_i + dy), maze, 'Elevator'):
                             break
                 else:
-                    if (maze[row_i][cell_i + 1] is not None or maze[row_i + 1][cell_i] is not None) and (maze[row_i][cell_i - 1] is not None or maze[row_i - 1][cell_i]):
+                    if (maze[row_i][cell_i - 1] is not None or maze[row_i - 1][cell_i]):
+                        other = check([cell_i, row_i + 1], [cell_i + 1, row_i], 'Tile')
+                        if other is None:
+                            other = check([cell_i + 2, row_i + 1], [cell_i + 1, row_i + 2], 'Tile')
+                            if other is not None:
+                                diag = maze[row_i + 1][cell_i + 1].z1 if cell_valid([cell_i + 1, row_i + 1], maze) else 0
+                                if cell.z - other.z1 >= 2 and probability > random.randint(0,100) and diag + 1 <= other.z1:
+                                    maze[row_i][cell_i] =  Elevator(None, cell.z, "A", max(0, other.z - 1))
+                                    print(cell_i,row_i, cell.z1)
+                        elif cell.z - other.z >= 2 and probability > random.randint(0,100):
+                            maze[row_i][cell_i] =  Elevator(None, cell.z, "A", other.z)
                         
-                        other = higher(maze[row_i][cell_i + 1], maze[row_i + 1][cell_i])
-                        if cell.z - other.z >= 2 and probability > random.randint(0,100):
-                            maze[row_i][cell_i] = Elevator(None, cell.z, "A", other.z)
-                
 
 def create_maze(width, height, stair_prob=0):
     if width % 2 == 0:
@@ -289,7 +302,7 @@ def draw_block(screen, x, y, h, z=0, offset=(0,0), sprite=sprite):
 
     
 
-def draw_map(screen, layout, offset=(0,0)):
+def draw_map(screen, layout, offset=(0,0), sprite='block'):
     tiles_to_draw = []
     rows = len(layout)
     cols = len(layout[0])
@@ -301,20 +314,22 @@ def draw_map(screen, layout, offset=(0,0)):
                 if isinstance(tile, Elevator):
                     tile.update()
                     tile = tile.current_z
+                    draw_block(screen, x, y, 1, tile, offset, sprite='elevator')
+                    
                 else:
                     tile = tile.z
-                draw_block(screen, x, y, WALL_HEIGHT, tile, offset)
+                    draw_block(screen, x, y, WALL_HEIGHT, tile, offset, sprite=sprite)
                 
         
 
 def in_range(pos, maze):
     return 0 <= pos[0] < len(maze[0]) and 0 <= pos[1] < len(maze)
 
-def render(maze, player=None, offset=(0,0), entities=[]):
+def render(maze, player=None, offset=(0,0), entities=[], sprite='block'):
     dz = 0
 
     display.fill((40, 0, 40))
-    draw_map(display, maze, offset=offset)
+    draw_map(display, maze, offset=offset, sprite=sprite)
     if player is not None:
         tile = maze[player[1]][player[0]]
         if isinstance(tile, Elevator):
@@ -505,7 +520,7 @@ def reset():
         add_elevators(maze, 100)
         path = trace(player, (w - 2, h - 2), maze)
 
-    return {'w': w, 'h': h, 'maze': maze, 'player': player, 'scroll': render_scroll, 'path': path}
+    return {'w': w, 'h': h, 'maze': maze, 'player': player, 'scroll': render_scroll, 'path': path, 'sprite': random.choice(( 'block', 'block1', 'block2', 'block3', 'block4', 'block5',))}
 ###############################################################################################################################################################
 ###############################################################################################################################################################
 ###############################################################################################################################################################
@@ -545,7 +560,6 @@ while running:
             cell, next_cell = maze[player[1]][player[0]], maze[next_coord[1]][next_coord[0]]
             if next_cell.z == next_coord[2]:
                 new_player, diff = border_check(maze, player, [next_coord[0] - player[0], next_coord[1] - player[1]])
-                print(next_coord, new_player, maze[next_coord[1]][next_coord[0]].type, diff)
                 
                 # if (cell.type == 'Tile' or next_cell.type == 'Tile' and diff[:2] != [0,0]) or (type(diff[1]) == float):
                 if list(next_coord[:2]) == new_player:
@@ -563,20 +577,25 @@ while running:
         player = r['player']
         render_scroll = r['scroll']
         path = r['path']
+        sprite = 'block1'
+        print(sprite)
+    # print(sprite)
     # if entity_path == [] or entity_path is None:
     #     entity_path = trace(entity, player, maze)
     # elif tick[0] % 5 == 0:
     #     entity = entity_path.pop(0)
     
         
-    render_scroll[1] += render(maze, offset=render_scroll, player=player, entities=[])
+    render_scroll[1] += render(maze, offset=render_scroll, player=player, entities=[], sprite=sprite)
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
         
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_e:
-                add_elevators(maze, probability=100)
+                add_elevators(maze, probability=60)
+            if event.key == pygame.K_p:
+                print_maze(maze, spacing="\n=============0====================\n")
             if event.key == pygame.K_c:
                     
                     maze = create_maze(WIDTH,HEIGHT)
