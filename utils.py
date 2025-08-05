@@ -17,7 +17,12 @@ def load_image(path):
 def coord_add(a, b):
     return (a[0] + b[0], a[1] + b[1])
 
-def cell_check(pos, maze):
+def cell_valid(pos, maze):
     if pos[0] in range(len(maze[0])) and pos[1] in range(len(maze)):
         return maze[pos[1]][pos[0]] is not None
     return False
+
+def cell_type(pos, maze, cell_type='Tile'):
+    if cell_valid(pos, maze):
+        return cell_type == maze[pos[1]][pos[0]].type
+    return False    
