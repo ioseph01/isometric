@@ -1,4 +1,3 @@
-from pdb import run
 import pygame
 import random
 from entities import Entity
