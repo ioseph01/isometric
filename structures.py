@@ -1,15 +1,12 @@
 import random
 from utils import *
 
-def in_range(coord, maze):
-    return 0 <= coord[0] < len(maze[0]) and 0 <= coord[1] < len(maze)
 
 class Tile:
-    def __init__(self, game, z, sprite):
-        self.game = game
+    def __init__(self, maze, z, x, y):
+        self.maze = maze
         self.pos = z
-        
-        # self.sprite = game.assets[sprite]
+        self.x, self.y = x, y
        
     @property
     def z(self):
@@ -25,10 +22,31 @@ class Tile:
     @property
     def z1(self):
         return self.pos
+    
+    @property
+    def render_pos(self):
+        ''' Returns calculated x and y of to_iso adjusted to tile height '''
+        iso_x, iso_y = to_iso(self.x, self.y, self.maze.TILE_WIDTH, self.maze.TILE_HEIGHT)
+        iso_y -= self.z * (self.maze.TILE_HEIGHT // 2)  
+        return [iso_x, iso_y]
+
+
+    def render(self, screen, h, offset, wall_spacing):
+        x,y = self.render_pos
+        for i in reversed(range(h)):
+            screen.blit(self.maze.assets[self.type], (x + offset[0], y + offset[1] + wall_spacing * i))
+        #     screen.blit(self.maze.assets['Elevator'], (x + offset[0], y + offset[1] + wall_spacing * i)) 
+        # screen.blit(self.maze.assets['Elevator'], (x + offset[0], y + offset[1] + wall_spacing))
+        # if self.type == 'Elevator':
+        #     print(self.type in self.maze.assets)
+            
+    def update(self):
+        pass
+
 
 class Elevator(Tile):
-    def __init__(self, game, z, sprite, other_z):
-        super().__init__(game, int(z), sprite)
+    def __init__(self, game, z, other_z, x, y):
+        super().__init__(game, int(z), x, y)
         self.z2 = int(other_z)
         self.current_z = z
         self.direction = -1
@@ -60,5 +78,8 @@ class Elevator(Tile):
                 self.time_stopped = 60
         else:
             self.time_stopped -= 1 
+
+    def render(self, screen, h, offset, wall_spacing):
+        super().render(screen, 1, offset, wall_spacing)
             
 
