@@ -1,25 +1,28 @@
 import pygame
 import random
+from noise import pnoise2
 from structures import Elevator, Tile
 from utils import *
 
 NEIGHBORS = [(-1,0), (0,-1), (1,0), (0,1)]
 
 class Maze:
-    def __init__(self, game, width, height, tile_asset, elevator_asset, stair_prob=0, room_attempts=0, sparsity=[0,0], elevator_prob=0):
+    def __init__(self, game, width, height, tile_asset, elevator_asset, color_table=None,
+                 sprite_variant=None, stair_prob=0, room_attempts=0, sparsity=[0,0], elevator_prob=0):
         self.game = game
         self.maze = self.create_maze(width, height)
-        self.width = width
+        self.width = width 
         self.height = height
         self.TILE_WIDTH, self.TILE_HEIGHT = 20, 10
         self.WALL_HEIGHT = 4
         self.WALL_SPACING = 4
+        
+        self.sprite_variant = sprite_variant
+        
         self.assets = {
-            'Tile': self.game.assets[tile_asset],
-            'Elevator': self.game.assets[elevator_asset],
+            'Tile': [replace_colors(img, color_table) for img in self.game.assets[tile_asset]],
+            'Elevator': [replace_colors(img, color_table) for img in self.game.assets[elevator_asset]],
         }
-        print(self.assets['Tile'])
-        print(self.assets['Elevator'])
         
         self.maze = self.generate_rooms(room_attempts)
         self.maze = self.combine(self.carve(self.maze, stair_prob=stair_prob), self.carve(self.create_maze(width, height)), sparsity=sparsity)
@@ -50,7 +53,6 @@ class Maze:
     def h(self):
         return self.height
 
-
     def in_range(self, coord):
         return 0 <= coord[0] < self.w and 0 <= coord[1] < self.h
 
@@ -80,7 +82,7 @@ class Maze:
             col = ""
             for y in range(self.rows):
                 if self.maze[y][x] is not None:
-                    col += symbol(self.maze[y][x].z)
+                    col += symbol(int(self.maze[y][x].z))
                 else:
                     col += "#"
             print(col)
@@ -102,7 +104,6 @@ class Maze:
             return self.maze
         for attempt in range(attempts):
             x,y,w,h = random.randint(0,((self.cols - 3) // 2)) * 2 + 1, random.randint(0,(self.rows - 3) // 2) * 2 + 1, random.randint(2, 6), random.randint(2,6)
-            print(x,y,w,h)
             if x + w < len(self.maze[0]) - 2 and y + h < len(self.maze) - 2:
                 room = pygame.Rect(x,y,w,h)
                 for r in rooms:
@@ -152,7 +153,7 @@ class Maze:
                     continue
                 seen.add((cx, cy))
         
-                if self.in_range((cx, cy)) and layout[cy][cx] == ".":
+                if layout[cy][cx] == ".":
                     layout[cy][cx] = Tile(self, z_val, cx, cy)
                     for dx, dy in [(0,1), (1,0), (0,-1), (-1,0)]:
                         nx, ny = cx + dx, cy + dy
@@ -223,6 +224,7 @@ class Maze:
         for row_i, row in enumerate(maze):
             for cell_i, cell in enumerate(row):
                 if cell is not None:
+                        
                     for dx in range(-1,100):
                     
                         dy = dx + 1 if dx > -1 else 1
@@ -279,7 +281,6 @@ class Maze:
                                     diag = maze[row_i + 1][cell_i + 1].z1 if cell_valid([cell_i + 1, row_i + 1], self) else 0
                                     if cell.z - other.z1 >= 2 and probability > random.randint(0,100) and diag + 1 <= other.z1:
                                         maze[row_i][cell_i] =  Elevator(self, cell.z, max(0, other.z - 1), cell_i, row_i)
-                                        print(cell_i,row_i, cell.z1)
                             elif cell.z - other.z >= 2 and probability > random.randint(0,100):
                                 maze[row_i][cell_i] =  Elevator(self, cell.z, other.z, cell_i, row_i)
 
@@ -305,15 +306,25 @@ class Maze:
 
     
 
-    def draw_map(self, screen, offset=(0,0)):
+    def draw_map(self, screen, offset=(0,0), entities={}, paused=False):
         ''' Maze render function '''
         for y in range(self.h):
             for x in range(self.w):
                 tile = self.maze[y][x]
                 if tile is not None:
-                    tile.update()
+                    if not paused:
+                        tile.update()
                     tile.render(screen, self.WALL_HEIGHT, offset, self.WALL_SPACING)
+                    
+                  
+                            
 
+        for y in range(self.h):
+            for x in range(self.w):
+                if (x,y) in entities:
+                    for e in entities[(x,y)]:
+                            e.render(screen, offset)
+                        
 
     def border_check(self, player, direction):
         if direction == [0,0]:
@@ -430,5 +441,35 @@ class Maze:
                     if val not in visited:
                         paths.append(current + [val])
      
+        return []
+
+    def generate_gems(self):
+        locs = []
+
+        GRID_WIDTH = 40
+        GRID_HEIGHT = 40
+
+        SCALE = 15.0
+        THRESHOLD = -.15
+        CLUSTER_ATTEMPTS = 100
+        CLUSTER_SIZE = (2, 5)
 
 
+        noise_map = [[pnoise2(x / SCALE, y / SCALE, octaves=3)
+                      for x in range(GRID_WIDTH)] for y in range(GRID_HEIGHT)]
+
+        for _ in range(CLUSTER_ATTEMPTS):
+            x = random.randint(0, GRID_WIDTH - 1)
+            y = random.randint(0, GRID_HEIGHT - 1)
+
+            if noise_map[y][x] > THRESHOLD:
+                num_plants = random.randint(*CLUSTER_SIZE)
+                for _ in range(num_plants):
+                    dx = int(random.gauss(0, 2))
+                    dy = int(random.gauss(0, 2))
+                    nx, ny = x + dx, y + dy
+                    
+                    if cell_type((nx, ny), self):
+                        locs.append((nx, ny))
+                        
+        return locs
