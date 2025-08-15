@@ -1,6 +1,6 @@
 import pygame
 import random
-from entities import Entity
+from entities import Enemy, Entity, Gem, Player
 from maze import Maze
 from structures import Elevator, Tile
 from utils import *
@@ -12,9 +12,10 @@ class Game:
     def __init__(self):
         pygame.init()
         
-        self.sprite = "block3"
+        self.sprite = "tile"
         self.screen = pygame.display.set_mode((800, 600))
-        self.display = pygame.Surface((400,300), pygame.SRCALPHA)
+        self.display = pygame.Surface((320,240), pygame.SRCALPHA)
+        self.display = pygame.Surface((200,150), pygame.SRCALPHA)
         self.clock = pygame.time.Clock()
         pygame.display.set_caption("Isometric")
         
@@ -22,43 +23,44 @@ class Game:
         self.movement = [False, False, False, False]
 
         self.assets = {
-            'elevator': load_image('elevator1.png'),
-            'block': load_image('block.png'),
-            'block1': load_image('block1.png'),
-            'block2': load_image('block2.png'),
-            'block3': load_image('block3.png'),
-            'block4': load_image('block4.png'),
-            'block5': load_image('block5.png'),
-            'entity': load_image('ball.png'),
+            'elevator': load_images('elevators'),
+            'tile': load_images('tiles'),
+            'entity': load_image('monster.png'),
             'ramp_right': load_image('ramp.png'),
             'ramp_left': pygame.transform.flip(load_image('ramp.png'), True, False),
             'wall': load_image('wall.png'),
-            'player': load_image('gem.png')
+            'player': load_image('player.png'),
+            'gem': load_image('gem1.png')
         }
-        self.maze = Maze(self, 21,21, 'block1', 'elevator')
+        
+        self.level = 0
+        self.maze = Maze(self, 21,21, 'tile', 'elevator', color_table=None, stair_prob=0, sparsity=(100,100), )
+        self.entities = []
+        self.gems = set()
+        self.paused = False
         self.start_level()
         
     def start_level(self):
-        self.player = Entity(self, [1,1], self.assets['player'])
+        self.player = Player(self, [1,1], self.assets['player'], render_offset=[0,-12], e_type='Player')
+        self.entities = [Entity(self, [self.maze.w - 2, self.maze.h - 2], self.assets['entity'])]
+        self.entities = []
         self.tick = [0, 60]
+        self.paused = False
+        
 
 
-    def render(self, maze, player=None, offset=(0,0), entities=[]):
+    def render(self, maze, player=None, offset=(0,0), entities={}):
+        K = (player.x, player.y)
+        entities.setdefault(K, []).append(player)
+
         dz = 0
-
-        self.display.fill((40, 0, 40))
-        self.maze.draw_map(self.display, offset=offset)
+        self.display.fill((220,200,240))
+        self.maze.draw_map(self.display, offset=offset, entities=entities, paused=self.paused)
         if player is not None:
             tile = self.player.at
             if tile.type == 'Elevator':
                 if tile.time_stopped <= 0:
                     dz = .5 * tile.direction
-            self.player.render(self.display, self.maze.WALL_HEIGHT, offset=offset)
-        # for e in entities:
-        #     print(maze[e[1]][e[0]].z)
-        #     print( [offset[0], offset[1] - 12], "entity")
-            
-        #     draw_block(display, e[0], e[1], 1, maze[e[1]][e[0]].z, offset=[offset[0], offset[1] - 12], sprite="entity")
         pygame.transform.scale(self.display, self.screen.get_size(), self.screen)
         pygame.display.flip()
     
@@ -81,16 +83,27 @@ class Game:
 
 
     def reset(self):
+        self.paused = False
+        self.level += 1
+        self.player.pos = [1,1]
+        self.player.path = []
+        self.gems = set()
+        print("LEVEL", self.level)
         while 1:
             try:
                 WIDTH, HEIGHT = random.randint(3,10) * 2 + 1, random.randint(3,10) * 2 + 1 
                 i = random.randint(0,5)
-                sprite = 'block' + str(i) if i != 0 else 'block'
-                self.maze = Maze(self, WIDTH, HEIGHT, sprite, 'elevator', random.randint(0,100), random.randint(-5,10), [random.randint(0,100), random.randint(0,100)], random.randint(-20,100))
-                self.player.pos = [1,1]
+                sprite = 'tile'
+                if self.level % 2 == 0:
+                    self.maze = Maze(self, WIDTH, HEIGHT, sprite, 'elevator', None, random.choice([0,1,2,3,None]),
+                                 random.randint(0,100), random.randint(-5,10), [random.randint(0,100), random.randint(0,100)],
+                                 random.randint(-20,100))
+                else:
+                    self.maze = Maze(self, WIDTH, HEIGHT, sprite, 'elevator', None, random.choice([0,1,2,3,None]),
+                                 random.randint(0,100), random.randint(-5,10), [0,0],
+                                 random.randint(-20,100))
                 self.render_offset = self.test()
-                self.player.path = []
-                
+                self.entities = [Enemy(self, [self.maze.w - 2, self.maze.h - 2], self.assets['entity'], render_offset=[0,-8], e_type='Enemy') for i in range(min(10, self.level))]
                 return
             except RuntimeError:
                 pass
@@ -98,82 +111,65 @@ class Game:
     def run(self):
         running = True
         while running:
-            self.tick[0] = (self.tick[0] + 1) % self.tick[1]
-            diff = [0,0]
-            if self.tick[0] % 5 == 0:
-        
-                if self.player.path == [] or self.player.path is None:
-                    new_player, diff = self.maze.border_check(self.player.pos, [self.movement[1] - self.movement[3], self.movement[0] - self.movement[2]])
-                else:
-                    next_coord = self.player.path[0]
-                    cell, next_cell = self.player.at, self.maze.maze[next_coord[1]][next_coord[0]]
-                    if next_cell.z == next_coord[2]:
-                        new_player, diff = self.maze.border_check(self.player.pos, [next_coord[0] - self.player.x, next_coord[1] - self.player.y])
-                        if list(next_coord[:2]) == new_player:
-                            self.player.path.pop(0)
-                # print(diff)
-                self.render_offset[1] -= diff[1]
-                self.render_offset[0] -= diff[0]
-                self.player.pos = new_player
+            if not self.paused:
+                self.tick[0] = (self.tick[0] + 1) % self.tick[1]
+            
+                self.player.update(self.tick[0], movement=self.movement)
     
-            # if self.player.pos == [WIDTH - 2, HEIGHT - 2] and self.tick[0] == 0:
-            #     r = reset()
-            #     WIDTH = r['w']
-            #     HEIGHT = r['h']
-            #     maze = r['maze']
-            #     player = r['player']
-            #     render_scroll = r['scroll']
-            #     path = r['path']
-            #     sprite = 'block1'
-            #     print(sprite)
-            # print(sprite)
-            # if entity_path == [] or entity_path is None:
-            #     entity_path = trace(entity, player, maze)
-            # elif tick[0] % 5 == 0:
-            #     entity = entity_path.pop(0)
-    
-            self.render_offset[1] += self.render(self.maze, self.player, self.render_offset, [], )
+                entity_dict = {}
+                for gem in self.gems.copy():
+                    if tuple(self.player.pos) == gem:
+                        self.gems.remove(gem)
+                    else:
+                        entity_dict.setdefault(gem, []).append(Gem(self, gem, self.assets['gem']))
+                    
+                for entity in self.entities.copy():
+                    if entity.hp > 0:
+                        entity.update(entity_dict)
+                        if (entity.x, entity.y) in self.gems:
+                            self.gems.remove((entity.x, entity.y))
+                        
+                        if entity.pos == self.player.pos:
+                            print("PLAYER GET")
+                            self.paused = True
+                        entity_dict.setdefault((entity.x, entity.y), []).append(entity)
+                    else:
+                        self.entities.remove(entity)
+
+            
+
+            self.render_offset[1] += self.render(self.maze, self.player, self.render_offset, entities=entity_dict)
+                
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
         
                 if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_k:
+                        self.entities = []
+                    if event.key == pygame.K_i:
+                        self.gems = set()
+                    if event.key == pygame.K_o:
+                        locs = self.maze.generate_gems()
+                        for l in locs:
+                            self.gems.add(l)
+                        print("Number of gems :", len(self.gems))
                     if event.key == pygame.K_e:
                         self.maze.add_elevators(60)
+                    if event.key == pygame.K_l:
+                        print(self.player.pos)
                     if event.key == pygame.K_p:
                         self.maze.print_maze(spacing="\n=============0====================\n")
                     if event.key == pygame.K_c:
                         self.reset()
-                        continue
-
-                    # if event.key == pygame.K_b:
-                    #     for i in range(100):
-                    #         WIDTH, HEIGHT = random.randint(3,10) * 2 + 1, random.randint(3,10) * 2 + 1
-                    #         print(WIDTH,HEIGHT)
-                    #         maze = create_maze(WIDTH, HEIGHT)
-                    #         maze = carve(generate_rooms(maze, random.randint(0,10)), stair_prob=random.randint(-20,100))
-                    #         maze = combine(maze, carve(create_maze(WIDTH,HEIGHT), 0), (random.randint(0,100),random.randint(0,100)))
-                    #         fix_maze(maze)
-                    #         player = [1,1]
-                    #         print_maze(maze)
-                    #         render_scroll = test(maze, display)
-                    #         print(render_scroll, "pos player")
-                    #         path = trace(player, (WIDTH - 2, HEIGHT - 2), maze)
-                    #         if (path is None):
-                    #             print("ATTEMPT", i + 1, '#')
-                    #             break
-                    
-                    #     continue
-
+                       
+                    if event.key == pygame.K_r:
+                        self.paused = not self.paused
                     if event.key == pygame.K_t:
-                        self.player.path = self.maze.trace(self.player.pos, (self.maze.width - 2, self.maze.height - 2)) 
-                    # if event.key == pygame.K_SPACE:
-                    #     player = [1,1]
-                    #     fix_maze(maze)
-                    #     print_maze(maze, "\n=====================================\n")
-                    #     render_scroll = test(maze, display)
-                    #     print(render_scroll)
-                
+                        for entity in self.entities:
+                            entity.path = self.maze.trace(entity.pos, self.player.pos)
+                    if event.key == pygame.K_SPACE:
+                        pass
                     if event.key == pygame.K_UP:
                         self.render_offset[1] += 10
                 
@@ -185,17 +181,17 @@ class Game:
                 
                     elif event.key == pygame.K_LEFT:
                         self.render_offset[0] += 10
-                    if event.key == pygame.K_w:
-                        self.movement[2] = True
-                    elif event.key == pygame.K_d:
-                        self.movement[3] = True
-                    elif event.key == pygame.K_s:
-                        self.movement[0] = True
-                    elif event.key == pygame.K_a:
-                        self.movement[1] = True
-                    if event.key == pygame.K_r:
-                        WALL_SPACING = (WALL_SPACING + 1) % 46
-                
+                    if not self.paused:
+                        
+                        if event.key == pygame.K_w:
+                            self.movement[2] = True
+                        elif event.key == pygame.K_d:
+                            self.movement[3] = True
+                        elif event.key == pygame.K_s:
+                            self.movement[0] = True
+                        elif event.key == pygame.K_a:
+                            self.movement[1] = True
+                        
                 if event.type == pygame.KEYUP:
                     if event.key == pygame.K_w:
                         self.movement[2] = False
