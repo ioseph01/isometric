@@ -1,4 +1,5 @@
 from utils import sign, to_iso
+from structures import Tile
 import pygame
 import random 
 
@@ -73,6 +74,10 @@ class Player(Entity):
     def update(self, tick, movement=[0,0,0,0]):
         
         if tick % 2 == 0:
+            if self.at.type == 'Player_Tile':
+                tile = self.at
+                self.game.maze.maze[tile.y][tile.x] = Tile(self.game.maze, tile.z1, tile.x, tile.y)
+                self.game.tile_outline |= self.at.get_outline()
             diff = [movement[1] - movement[3], movement[0] - movement[2]]
             
             if diff[0] != 0 and diff[1] != 0:
@@ -115,11 +120,12 @@ class Enemy(Entity):
         neighbors = list(self.at.adjacent_cells)
         candidates = []
         for n in neighbors:
-            dist = cheb_dist([n.x, n.y])
-            improvement = current_dist - dist
-            if improvement >= 0:
-                weight = improvement + 1
-                candidates.append(([n.x, n.y, min(n.all_z, key=lambda x: abs(x - self.at.z))], weight))
+            if n.type != 'Player_Tile':
+                dist = cheb_dist([n.x, n.y])
+                improvement = current_dist - dist
+                if improvement >= 0:
+                    weight = improvement + 1
+                    candidates.append(([n.x, n.y, min(n.all_z, key=lambda x: abs(x - self.at.z))], weight))
 
         if not candidates:
             return [self.x, self.y, self.at.z]
@@ -140,7 +146,6 @@ class Enemy(Entity):
                 new_pos, diff = self.game.maze.border_check(self.pos, [next_coord[0] - self.x, next_coord[1] - self.y])
                 if list(next_coord[:2]) == new_pos and self.movement_offset == [0,0]:
                     self.path.pop(0)
-            
                 self.pos = new_pos
             else:
                 diff = coord_transform(*old)
@@ -163,16 +168,21 @@ class Enemy(Entity):
                     self.movement_offset = move(self.movement_offset, *diff)
                 
                 
-    def update(self, entity_dict):
+    def update(self, pos_dict):
         if self.path is None or self.path == []:
             self.path = [self.greedy_move_toward_player()]
+            if random.randint(0,100) == 0:
+                self.path = self.game.maze.trace(self.pos, self.game.player.pos)[:random.randint(15,50)]
+                print("HUNTING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         elif self.game.tick[0] % 5 == 0:
             next_coord = self.path[0]
-            if (next_coord[0], next_coord[1]) in entity_dict:
-                for e in entity_dict[(next_coord[0], next_coord[1])]:
-                    if e.type == 'Enemy':
-                        break
-                else:    
-                    self.goToNext(next_coord)
-            else:
-                self.goToNext(next_coord)
+            if tuple(next_coord[:2]) in pos_dict:
+                if pos_dict[tuple(next_coord[:2])] is not self:
+                    self.path = []
+                    return
+               
+            old_pos = self.pos
+            self.goToNext(next_coord)
+            if self.pos != old_pos:
+                pos_dict.pop(tuple(old_pos))
+                pos_dict[tuple(self.pos)] = self
