@@ -1,5 +1,6 @@
 import os
 import pygame
+from math import ceil
 from hashlib import md5
 
 
@@ -84,3 +85,27 @@ def stable_randint(x, y, z, level, min_val=0, max_val=3):
     h = md5(s.encode()).digest()
     val = int.from_bytes(h[:4], 'little')
     return val % (max_val - min_val + 1) + min_val
+
+
+def get_border_points():
+    ''' Generator that yields individual (x, y) points on the border '''
+    
+    def eq(x):
+        a = abs(ceil(x / 2) - 5)
+        remaining = 5 - a
+    
+        if remaining < 0:
+            return []
+    
+        y1 = 5 + remaining
+        y2 = 5 - remaining
+        return [y2] if y1 == y2 else [y2, y1]
+
+    for x in range(0, 20):
+        for y in eq(x):
+            yield (x, y)
+            
+
+def get_cell_type(pos, maze):
+    if cell_valid(pos, maze):
+        return maze.maze[pos[1]][pos[0]].type
