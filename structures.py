@@ -1,5 +1,5 @@
 import random
-from utils import *
+from scripts.utils import *
 
 
 def reduce_coord(x, y):
@@ -115,12 +115,13 @@ class Tile:
             ( 1, 0): generate_points(x_start=0,  y_start=5,  slope= 1), 
             }
         border_points = set()
+        neighbor_types = ('Elevator', 'Glass_Tile')
         if self.type != 'Elevator':
             neighbors = self.adjacent_cells
             borders = {k for k in _}
                     
             for neighbor in neighbors:
-                if neighbor.type != 'Elevator' and abs(neighbor.z1 - self.z1) != 1:
+                if neighbor.type not in neighbor_types and abs(neighbor.z1 - self.z1) != 1:
                     dx,dy = reduce_coord(neighbor.x - self.x, neighbor.y - self.y)
                     borders.discard((dx,dy))
                             
@@ -176,51 +177,122 @@ class Elevator(Tile):
         super().render(screen, 1, offset, wall_spacing)
         
        
+class Glass_Tile(Tile):
+    
+    def __init__(self, maze, z, x, y):
+        self.maze = maze
+        self.pos = z
+        self.x, self.y = x, y
+        self.time = 0
+        self.sprite = self.maze.assets[self.type]
+        intensity = .6
+        alpha = int(255 * intensity)
+        self.sprite.set_alpha(alpha)
+        self.sprite_grid = pygame.Surface(self.sprite.get_size(), pygame.SRCALPHA)
+        for px,py in get_border_points():
+            self.sprite_grid.set_at((px,py), (25,20,26))
+        
+    @property
+    def type(self):
+        return 'Glass_Tile'
+    
+    def deactive(self):
+        self.time = 600
+        print("GN!")
+    
+    @property
+    def active(self):
+        return self.time <= 0
+        
+    def update(self):
+        if self.time > 0:
+            self.time -= 1
+            
+            
+
+    def render(self, screen, h, offset, wall_spacing):
+        if self.active:
+            x,y = self.render_pos
+            screen.blit(self.sprite, (x + offset[0], y + offset[1]), special_flags=pygame.BLEND_ALPHA_SDL2)
+            screen.blit(self.sprite_grid, (x + offset[0], y + offset[1]))
+        
 
 class Player_Tile(Tile):
     def __init__(self, maze, z, x, y):
         self.maze = maze
         self.pos = z
         self.x, self.y = x, y
-        self.sprite = self.maze.assets[self.type]
-        intensity = .6
-        alpha = int(255 * intensity)
-        self.sprite.set_alpha(alpha)
+        self.sprite = self.maze.assets[self.type][0]
+        self.time = 60
+        self.active = True
+
 
     @property
     def type(self):
         return 'Player_Tile'
 
-    def render(self, screen, h, offset, wall_spacing):
-        x,y = self.render_pos
-        screen.blit(self.sprite, (x + offset[0], y + offset[1]), special_flags=pygame.BLEND_ALPHA_SDL2)
-        
+    def deactivate(self):
+        if self.active:
+            self.active = False
+            self.sprite = self.maze.assets[self.type][1]
 
-    def get_outline(self):
-        ''' Returns the points that make up its top grid lines '''
-        def generate_points(x_start=0, y_start=0, slope=1, n=10):
-            return [(x_start + i, y_start + slope * ((i + 1) // 2)) for i in range(n)]
-        
-        _ = {
-            ( 0,-1): generate_points(x_start=0,  y_start=5,  slope=-1), 
-            ( 0, 1): generate_points(x_start=10, y_start=10, slope=-1),
-            (-1, 0): generate_points(x_start=10, y_start=0,  slope= 1), 
-            ( 1, 0): generate_points(x_start=0,  y_start=5,  slope= 1), 
-            }
-        border_points = set()
-        neighbors = self.adjacent_cells
-        borders = {k for k in _}
-                    
-        new_surface = self.sprite.copy()
-        for dx,dy in borders:
-            points = _[(dx,dy)]
-            pos = self.render_pos
-            border_points |= set([(x + pos[0], y + pos[1]) for x,y in points])
+    def update(self):
+            
+        if not self.active:
+            if self.time <= 0:
+                self.maze.maze[self.y][self.x] = Tile(self.maze, self.z1, self.x, self.y)
+                self.maze.maze[self.y][self.x].sprite = self.sprite
+                
+            else:
+                self.time -= 1
+            
 
-        return border_points
-
+    
 class Enemy_Tile(Tile):
+    
+    def __init__(self, maze, z, x, y, cooldown=None):
+        self.maze = maze
+        self.pos = z
+        self.x, self.y = x, y
+        self.time = cooldown if cooldown is not None else 2
+        self.cooldown = cooldown
+        self.sprite = self.maze.assets[self.type]
+        
+    
     @property
     def type(self):
         return 'Enemy_Tile'
+    
+    @property
+    def active(self):
+        return self.time > 0
         
+    def update(self):
+        if self.cooldown is not None:
+            if abs(self.time) == 1:
+                if self.maze.game.player.pos != [self.x, self.y]:
+                    self.time = -self.time * self.cooldown
+                    
+                    
+            else:
+                self.time -= sign(self.time)
+                
+            
+    def render(self, screen, h, offset, wall_spacing):
+        if self.active:
+            sprite = self.sprite[0]
+        else:
+            sprite = self.sprite[1]
+
+        x,y = self.render_pos
+        screen.blit(sprite, (x + offset[0], y + offset[1]))
+
+        
+class Gem_Tile(Tile):
+    
+    def __init__(self, maze, z, x, y):
+        self.maze = maze
+        self.maze = maze
+        self.pos = z
+        self.x, self.y = x, y
+        self.sprite = self.maze.assets['Gem_Tile']
