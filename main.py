@@ -1,11 +1,12 @@
 import pygame
 import random
-from entities import Enemy, Entity, Gem, Player
-from maze import Maze
-from structures import Elevator, Tile
-from utils import *
+from scripts.entities import Enemy, Entity, Gem, Player
+from scripts.maze import Maze
+from scripts.utils import *
 
 NEIGHBORS = {(-1,0),(0,-1),(1,0),(0,1)}
+FILL = (242,242,255)
+BLACK = (25,20,26)
 
 
 class Game:
@@ -14,7 +15,6 @@ class Game:
         
         self.sprite = "tile"
         self.screen = pygame.display.set_mode((800, 600))
-        self.display = pygame.Surface((320,240), pygame.SRCALPHA)
         self.display = pygame.Surface((200,150), pygame.SRCALPHA)
         self.clock = pygame.time.Clock()
         pygame.display.set_caption("Isometric")
@@ -23,23 +23,22 @@ class Game:
         self.movement = [False, False, False, False]
 
         self.assets = {
-            'elevator': load_images('elevators'),
-            'tile': load_images('tiles'),
-            'tile_top': load_image('top.png'),
             'entity': load_image('monster.png'),
             'ramp_right': load_image('ramp.png'),
             'ramp_left': pygame.transform.flip(load_image('ramp.png'), True, False),
             'wall': load_image('wall.png'),
-            'player': load_image('player.png'),
+            'player': load_image('player2.png'),
             # 'player': load_image('Bird_2.png'),
-            'gem': load_image('gem1.png')
+            'gem': load_image('gem.png'),
+            'gemstone': load_image('gemstone.png'),
         }
         
         self.level = 0
         # self.maze = Maze(self, 21,21, 'tile', 'elevator', color_table=None, stair_prob=0, sparsity=(100,100), )
-        self.maze = Maze(self, 21,21, 'tile', 'elevator', 'tile_top', color_table={(255,0,0):(255,110,89), (0,0,255):(18,83,89)}, stair_prob=0, sparsity=(100,100), )
+        self.maze = Maze(self, 21,21, color_table={(255,0,0):(255,110,89), (0,0,255):(18,83,89)}, stair_prob=0, sparsity=(100,100), )
         self.entities = []
         self.gems = set()
+        self.gemstones = set()
         self.tile_outline = self.maze.get_tile_outline()
         self.paused = False
         self.start_level()
@@ -93,9 +92,11 @@ class Game:
 
     def reset(self):
         self.paused = False
-        self.level = min(6, self.level + 1)
+        # self.level = min(random.randint(6,7), self.level + 1)
+        self.level = 10
         self.player.path = []
         self.gems = set()
+        self.gemstones = set()
         self.entities = []
         color_table={(255,0,0):(255,110,89), (0,0,255):(18,83,89)}
         # color_table = None
@@ -103,18 +104,32 @@ class Game:
         while 1:
             try:
                 WIDTH, HEIGHT = random.randint(3,10) * 2 + 1, random.randint(3,10) * 2 + 1 
-                i = random.randint(0,5)
                 sprite = 'tile'
-                if self.level % 2 == 0:
+                if self.level % 4 == 0:
                     
-                    self.maze = Maze(self, WIDTH, HEIGHT, sprite, 'elevator', 'tile_top', color_table, random.choice([0,1,2,3,None]),
+                    self.maze = Maze(self, WIDTH, HEIGHT, color_table, random.choice([0,1,2,3,None]),
                                  random.randint(0,100), random.randint(-5,10), [random.randint(0,100), random.randint(0,100)],
                                  random.randint(-20,100))
-                else:
-                    self.maze = Maze(self, WIDTH, HEIGHT, sprite, 'elevator', 'tile_top', color_table, random.choice([0,3,3,3,None]),
+                elif self.level % 4 == 1:
+                    self.maze = Maze(self, WIDTH, HEIGHT, color_table, random.choice([0,3,3,3,None]),
                                  random.randint(0,100), random.randint(-5,10), [0,0],
                                  random.randint(-20,100))
+                elif self.level == 6:
+                    self.maze = Maze(self, WIDTH, HEIGHT, color_table, random.choice([0,1,2,3,None]),
+                                 random.randint(0,100), random.randint(-5,10), [random.randint(0,100), random.randint(0,100)],
+                                 random.randint(-20,100), random.randint(95,100))
+                elif self.level == 7:
+                    self.maze = Maze(self, WIDTH, HEIGHT, color_table, random.choice([0,1,2,3,None]),
+                                 random.randint(0,100), random.randint(-5,10), [random.randint(0,100), random.randint(0,100)],
+                                 random.randint(-20,100), 0, random.randint(5,100), 0)
+                else:
+                    print("GLASS")
+                    self.maze = Maze(self, WIDTH, HEIGHT, color_table, random.choice([0,1,2,3,None]),
+                                 random.randint(0,100), random.randint(5,20), [random.randint(50,100), random.randint(50,100)],
+                                 50, random.randint(5,60), random.randint(5,60), 30, random.randint(5,60))
+                    
                 self.player.pos = [self.maze.w - 2, self.maze.h - 2]
+                self.player.movement_offset = [0,0]
                 self.render_offset = self.test()
                 pos_dict = set()
                 self.entities = [Enemy(self, (x,y), self.assets['entity'], render_offset=[0,-8], e_type='Enemy') for x,y in self.maze.get_spawnpoints(1,1,random.randint(1,min(10, self.level)))]
@@ -132,13 +147,22 @@ class Game:
                 self.player.update(self.tick[0], movement=self.movement)
     
                 entity_dict = {}
-                pos_dict = {tuple(v.pos):v for v in self.entities}
-                for gem in self.gems.copy():
+                pos_dict = {tuple(v.pos):v for v in self.entities} | {w: None for w in self.gemstones}
+                
+                for gem in self.gemstones.copy():
                     if tuple(self.player.pos) == gem:
+                        self.gemstones.remove(gem)
+                    else:
+                        entity_dict.setdefault(gem, []).append(Gem(self, gem, self.assets['gemstone'], e_type='Gem', render_offset=[-1,-20]))
+                    
+
+                for gem in self.gems.copy():
+                    if tuple(self.player.pos) == gem or gem in self.gemstones:
                         self.gems.remove(gem)
                     else:
                         entity_dict.setdefault(gem, []).append(Gem(self, gem, self.assets['gem'], e_type='Gem'))
-                    
+                        
+                
                 for entity in self.entities.copy():
                     if entity.hp > 0:
                         entity.update(pos_dict)
@@ -164,6 +188,8 @@ class Game:
                     running = False
         
                 if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_u:
+                        self.maze.print_types()
                     if event.key == pygame.K_m:
                         print('==============================')
                         for k,v in self.maze.settings.items():
@@ -184,17 +210,19 @@ class Game:
                         self.display = pygame.Surface((max(4, x - 4), max(y - 3, 3)), pygame.SRCALPHA)
                         print(self.display.get_size())
                     if event.key == pygame.K_o:
-                        locs = self.maze.generate_gems()
-                        for l in locs:
+                        gems, gemstones = self.maze.generate_gems(20, 1)
+                        for l in gems:
                             self.gems.add(l)
-                        print("Number of gems :", len(self.gems))
+                        for l in gemstones:
+                            self.gemstones.add(l)
+                        print("Number of gems :", len(self.gems), '\nNumber of gemstones :', len(self.gemstones))
                     if event.key == pygame.K_e:
                         self.maze.add_elevators(60)
                         self.tile_outline = self.maze.get_tile_outline()
                     if event.key == pygame.K_l:
-                        print(self.player.pos, self.player.type)
+                        print(self.player.pos, self.player.type, self.player.movement_offset)
                         for e in self.entities:
-                            print(e.pos, e.type, e.movement_offset)
+                            print(e.pos, e.type, e.movement_offset, e.path)
                     if event.key == pygame.K_p:
                         self.maze.print_maze(spacing="\n=============0====================\n")
                     if event.key == pygame.K_c:
