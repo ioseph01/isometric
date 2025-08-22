@@ -1,5 +1,5 @@
-from utils import sign, to_iso
-from structures import Tile
+from scripts.utils import sign, to_iso
+from scripts.structures import Tile
 import pygame
 import random 
 
@@ -50,7 +50,10 @@ class Entity:
     
     def render(self, screen, offset):
         x,y = self.render_pos
-        screen.blit(pygame.transform.flip(self.sprite, self.flip, False), (x + offset[0] + self.render_offset[0] + self.movement_offset[0], y + offset[1] + self.render_offset[1] + self.movement_offset[1]))
+        screen.blit(pygame.transform.flip(self.sprite, self.flip, False), (x + offset[0] + self.render_offset[0] + self.movement_offset[0], int(y) + offset[1] + self.render_offset[1] + self.movement_offset[1]))
+
+        if self.type == 'Player':
+            print(x + offset[0] + self.render_offset[0] + self.movement_offset[0], int(y) + offset[1] + self.render_offset[1] + self.movement_offset[1])
 
     def update(self):
         pass
@@ -63,6 +66,14 @@ class Gem(Entity):
 
 
 class Player(Entity):
+    
+    def __init__(self, game, pos, sprite, hp=1, render_offset=[0, 0], e_type=None):
+        super().__init__(game, pos, sprite, hp, render_offset, e_type)
+        self.idle = 0
+
+    def render(self, screen, offset):
+        screen.blit(pygame.transform.flip(self.sprite, self.flip, False), (100,63))
+
     @property
     def next_in_path(self):
         if self.path == [] or self.path is None:
@@ -75,9 +86,7 @@ class Player(Entity):
         
         if tick % 2 == 0:
             if self.at.type == 'Player_Tile':
-                tile = self.at
-                self.game.maze.maze[tile.y][tile.x] = Tile(self.game.maze, tile.z1, tile.x, tile.y)
-                self.game.tile_outline |= self.at.get_outline()
+                self.at.deactivate()
             diff = [movement[1] - movement[3], movement[0] - movement[2]]
             
             if diff[0] != 0 and diff[1] != 0:
@@ -85,6 +94,7 @@ class Player(Entity):
             else:
                 old = diff
             if old != [0,0]:
+                self.idle = 100
                 diff = coord_transform(*old)
                 
                 if sign(diff[0]) == -1:
@@ -94,11 +104,21 @@ class Player(Entity):
                 
                 if not in_tile(self.movement_offset, *diff):
                     new_player, diff2 = self.game.maze.border_check(self.pos, old)
+                    next_cell = self.game.maze.maze[new_player[1]][new_player[0]]
+                    if next_cell.type == 'Glass_Tile':
+                        if not next_cell.active:
+                            return
+                    elif next_cell.type == 'Enemy_Tile':
+                        if next_cell.active:
+                            return
+
                     if self.pos != new_player:
                         old = self.movement_offset
                         self.movement_offset = move(self.movement_offset, *diff)
                         self.game.render_offset[0] -= diff[0]
                         self.game.render_offset[1] -= diff[1] + diff2[1] - 5 * sign(diff2[1])
+                        if self.at.type == 'Glass_Tile':
+                            self.game.maze.maze[self.y][self.x].deactive()
                     
                     self.pos = new_player
 
@@ -107,11 +127,17 @@ class Player(Entity):
                     self.movement_offset = move(self.movement_offset, *diff)
                     self.game.render_offset[0] -= self.movement_offset[0] - old[0]
                     self.game.render_offset[1] -= self.movement_offset[1] - old[1]
-            
+            else:
+                if self.idle <= 0:
+                    self.action = 'idle'
+                self.idle = max(self.idle - 1, 0)
 
 
 class Enemy(Entity):
-    
+    @property
+    def walkables(self):
+        return('Enemy_Tile', 'Elevator', 'Tile', 'Glass_Tile')
+
     def greedy_move_toward_player(self):
         def cheb_dist(pos):
             return max(abs(self.game.player.x - pos[0]), abs(self.game.player.y - pos[1]))
@@ -120,7 +146,7 @@ class Enemy(Entity):
         neighbors = list(self.at.adjacent_cells)
         candidates = []
         for n in neighbors:
-            if n.type != 'Player_Tile':
+            if n.type in self.walkables:
                 dist = cheb_dist([n.x, n.y])
                 improvement = current_dist - dist
                 if improvement >= 0:
@@ -137,6 +163,17 @@ class Enemy(Entity):
         
     def goToNext(self, next_coord):
         cell, next_cell = self.at, self.game.maze.maze[next_coord[1]][next_coord[0]]
+        
+        for z in next_cell.all_z:
+            if z == next_coord[2]:
+                break
+        else:
+            self.path.pop(0)
+            return
+        if next_cell.type == 'Glass_Tile':
+            if not next_cell.active:
+                self.path = []
+                return
         if cell == next_cell and self.movement_offset != [0,0]:
             self.movement_offset[0] -= 2 * sign(self.movement_offset[0])
             self.movement_offset[1] -= 1 * sign(self.movement_offset[1])
@@ -160,7 +197,8 @@ class Enemy(Entity):
                     if self.pos != new_player:
                         old = self.movement_offset
                         self.movement_offset = move(self.movement_offset, *diff)
-                    
+                    if self.at.type == 'Glass_Tile':
+                        self.game.maze.maze[self.y][self.x].deactive()
                     self.pos = new_player
 
                 else:
@@ -172,7 +210,8 @@ class Enemy(Entity):
         if self.path is None or self.path == []:
             self.path = [self.greedy_move_toward_player()]
             if random.randint(0,100) == 0:
-                self.path = self.game.maze.trace(self.pos, self.game.player.pos)[:random.randint(15,50)]
+                path = self.game.maze.trace(self.pos, self.game.player.pos)[:random.randint(15,50)]
+                self.path = path if path is not None else self.path
                 print("HUNTING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         elif self.game.tick[0] % 5 == 0:
             next_coord = self.path[0]
