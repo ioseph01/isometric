@@ -1,14 +1,15 @@
 import pygame
 import random
 from noise import pnoise2
-from structures import Elevator, Enemy_Tile, Player_Tile, Tile
-from utils import *
+from scripts.structures import Elevator, Enemy_Tile, Glass_Tile, Player_Tile, Tile
+from scripts.utils import *
 
 NEIGHBORS = [(-1,0), (0,-1), (1,0), (0,1)]
 
 class Maze:
-    def __init__(self, game, width, height, tile_asset, elevator_asset, grid_asset, color_table=None,
-                 sprite_variant=None, stair_prob=0, room_attempts=0, sparsity=[0,0], elevator_prob=0):
+    def __init__(self, game, width, height, color_table=None,
+                 sprite_variant=None, stair_prob=0, room_attempts=0, sparsity=[0,0], elevator_prob=0,
+                 friendlies_prob=0, enemies_prob=0, enemies_cooldown=None, glass_prob=0):
         self.game = game
         self.maze = self.create_maze(width, height)
         self.width = width 
@@ -20,40 +21,42 @@ class Maze:
         self.sprite_variant = sprite_variant
         self.init_settings = {
             'width': width, 'height': height, 'sprite_variant':sprite_variant, 'stair_probability': stair_prob, 'room attempts': room_attempts,
-            'sparsity setting': sparsity, 'elevator_prob': elevator_prob
+            'sparsity setting': sparsity, 'elevator_prob': elevator_prob, 'friendlies_prob': friendlies_prob, 'enemies_prob': enemies_prob,
+            'glass_prob': glass_prob
             }
-        
         self.assets = {
-            'Tile': [replace_colors(img, color_table) for img in self.game.assets[tile_asset]],
-            'Elevator': [replace_colors(img, color_table) for img in self.game.assets[elevator_asset]],
-            'Player_Tile': self.game.assets[grid_asset]
+            'Tile': [replace_colors(img, color_table) for img in load_images('tiles')],
+            'Elevator': [replace_colors(img, color_table) for img in load_images('elevators')],
+            'Player_Tile': [replace_colors(img, color_table) for img in load_images('player_tiles')],
+            'Enemy_Tile': [replace_colors(img, color_table) for img in load_images('enemy_tiles')],
+            'Glass_Tile': load_image('glass_tile.png'),
+            'Gem_Tile': replace_colors(load_image('gem_tile.png'), color_table),
         }
-        
-        for i,surface in enumerate(self.assets['Tile']):
-            FILL = (242,242,255)
-            BLACK = (25,20,26)
-            new_surface = surface.copy()
-            w,h = new_surface.get_size()
-            for x in range(w):
-                for y in range(11):
-                    if new_surface.get_at((x,y)) == BLACK:
-                        new_surface.set_at((x,y), FILL)
-            self.assets['Tile'][i] = new_surface
-            
 
+      
+
+        self.enemy_tile_cooldown = enemies_cooldown
         self.maze = self.generate_rooms(room_attempts)
-        self.maze = self.combine(self.carve(self.maze, stair_prob=stair_prob), self.carve(self.create_maze(self.width, self.height)), sparsity=sparsity)
+        self.maze = self.combine(self.carve(self.maze, stair_prob=stair_prob), self.carve(self.create_maze(self.width, self.height)), sparsity=sparsity, friendlies_prob=friendlies_prob, enemies_prob=enemies_prob, glass_prob=glass_prob)
         self.maze = self.fix_maze(self.maze)
         self.add_elevators(elevator_prob)
         for i in range(10):
+            self.init_settings['elevator_prob'] = max(i * 10 + elevator_prob, elevator_prob, 15)
             print("Attempt", i)
             if self.trace([1,1], [self.width - 2, self.height - 2]) == []:
                 self.add_elevators(i * 10 + elevator_prob)
-                self.init_settings['elevator_prob'] = max(i * 10 + elevator_prob, elevator_prob)
+                self.maze = self.fix_maze(self.maze)
             else:
+                self.maze = self.fix_maze(self.maze)
                 break
         else:
             raise RuntimeError
+
+    def enemy_cooldown(self, x=0, y=0):
+        if self.enemy_tile_cooldown == 0:
+            result = pnoise2(x / self.w, y / self.h, octaves=1, base=self.game.level)
+            return int(round(3 + ((result + 1) / 2) * 57)) * 10
+        return self.enemy_tile_cooldown
 
     @property
     def settings(self):
@@ -243,6 +246,16 @@ class Maze:
 
 
     def fix_maze(self, maze):
+        def factory(e_type, z, x, y):
+            if e_type == 'Tile':
+                return Tile(self, z, x, y)
+            elif e_type == 'Glass_Tile':
+                return Glass_Tile(self, z, x, y)
+            elif e_type == 'Player_Tile':
+                return Player_Tile(self, z, x, y)
+            elif e_type == 'Enemy_Tile':
+                return Enemy_Tile(self, z, x, y, self.enemy_cooldown(x,y))
+
         for row_i, row in enumerate(maze):
             for cell_i, cell in enumerate(row):
                 if cell is not None:
@@ -257,18 +270,26 @@ class Maze:
                             to_check = maze[row_i + dy][cell_i + dx]
                             if to_check is not None:
                                 if to_check.z - cell.z > dz - 1:
-                                    maze[row_i + dy][cell_i + dx] = Tile(self, max(0, cell.z + dz - offset - random.choice([1,2,2,2,2,2])), cell_i + dx, row_i + dy)
+                                    # maze[row_i + dy][cell_i + dx] = Tile(self, max(0, cell.z + dz - offset - random.choice([1,2,2,2,2,2])), cell_i + dx, row_i + dy)
+                                    maze[row_i + dy][cell_i + dx] = factory(cell.type, max(0, cell.z + dz - offset - random.choice([1,2,2,2,2,2])), cell_i + dx, row_i + dy)
                             
                         if (b:= in_range([cell_i + dy, row_i + dx], self)):
                             to_check = maze[row_i + dx][cell_i + dy]
                             if to_check is not None:
                                 if to_check.z - cell.z > dz - 1:
-                                    maze[row_i + dx][cell_i + dy] = Tile(self, max(0, cell.z + dz - offset - random.choice([1,2,2,2,2,2])), cell_i + dy, row_i + dx)
+                                    maze[row_i + dx][cell_i + dy] = factory(cell.type, max(0, cell.z + dz - offset - random.choice([1,2,2,2,2,2])), cell_i + dy, row_i + dx)
                         if not a and not b:
                             break
+             
+        self.maze = maze
+        # if self.settings['friendlies_prob'] >= 50 or self.settings['enemies_prob'] >= 50:
+        if self.trace((1,1), (self.w - 2, self.h - 2)) != []:
+            for px, py, pz in self.trace((1,1), (self.w - 2, self.h - 2)) + self.trace((self.w - 2, self.h - 2), (1,1)):
+                cell = self.maze[py][px]
+                if cell.type == 'Enemy_Tile':
+                    self.maze[py][px] = random.choices([factory('Tile', pz, px, py), factory('Glass_Tile', pz, px, py)], weights=[80,5], k=1)[0]
                         
-                                
-        return maze
+        return self.maze
 
     def add_elevators(self, probability=80):
         if probability <= 0:
@@ -308,7 +329,7 @@ class Maze:
 
     
 
-    def combine(self, layout, other, sparsity):
+    def combine(self, layout, other, sparsity, friendlies_prob=0, enemies_prob=0, glass_prob=0):
         
         def makeTile(z,x,y):
             return Tile(self, z,x,y)
@@ -317,37 +338,47 @@ class Maze:
             return Player_Tile(self, z, x, y)
 
         def makeEnemyTile(z,x,y):
-            return Enemy_Tile(self,z,x, y)
-
+            return Enemy_Tile(self,z,x, y, self.enemy_cooldown(x,y))
+           
+        def makeGlassTile(z,x,y):
+            return Glass_Tile(self, z,x,y)
+        
+        
+        if sparsity == [0,0]:
+            return layout
+        
         for y in range(1, len(other) - 1):
             for x in range(1, len(layout[y]) - 1):
-                
+                tile = makeTile
                 if (layout[y][x] is None or None is other[y][x]):
                     if random.randint(0,100) < sparsity[0]:
                         tile = makeTile
-                    elif random.randint(0,100) < 50:
-                        tile = makePlayerTile
-                    else:
+                        if random.randint(0,100) < glass_prob:
+                            tile = makeGlassTile
+                        elif random.randint(0,100) < friendlies_prob and (x,y) :
+                            tile = makePlayerTile
+                        elif random.randint(0,100) < enemies_prob and (x,y):
+                            tile = makeEnemyTile
+                        for z in [layout[y][x], layout[y - 1][x], layout[y][x - 1]]:
+                            if z is not None:
+                                layout[y][x] = tile(z.z, x, y)
+                                break
                         continue
-                    for z in [layout[y][x], layout[y - 1][x], layout[y][x - 1]]:
-                        if z is not None:
-                            layout[y][x] = tile(z.z, x, y)
-                                
-                            break
-
-                if x != 0 and x != len(layout[0]) - 1 and y != 0 and y != len(layout) - 1 and x % 2 != 1 and y % 2 != 1:
-                    if random.randint(0, 100 ) < sparsity[1]:
-                        tile = makeTile
-                        tile = makePlayerTile
-                    elif random.randint(0,100) < 25:
-                        tile = makePlayerTile
-                    else:
-                        continue
-                    
-                    for z in [layout[y][x - 1], layout[y - 1][x]]:
-                        if z is not None:
-                            layout[y][x] = tile(z.z, x, y)
-                            break
+                            
+                    if x != 0 and x != len(layout[0]) - 1 and y != 0 and y != len(layout) - 1 and x % 2 != 1 and y % 2 != 1:
+                        if random.randint(0,100) < sparsity[1]:
+                            tile = makeTile
+                            if random.randint(0,100) < glass_prob:
+                                tile = makeGlassTile
+                            elif random.randint(0,100) < friendlies_prob and (x,y):
+                                tile = makePlayerTile
+                            elif random.randint(0,100) < enemies_prob and (x,y):
+                                tile = makeEnemyTile
+                            
+                            for z in [layout[y][x - 1], layout[y - 1][x]]:
+                                if z is not None:
+                                    layout[y][x] = tile(z.z, x, y)
+                                    break
     
         return layout
 
@@ -370,7 +401,7 @@ class Maze:
             if self.maze[player[1]][player[0]].type == 'Tile':
                 return player, [0,0]
         elif self.maze[player[1]][player[0]].type == 'Elevator':
-            if self.maze[player[1]][player[0]].time_stopped >= 50:
+            if self.maze[player[1]][player[0]].time_stopped > 50:
                 return player,[0,0]
             
         sign_ = sign(direction[0]) if sign(direction[0]) != 0 else sign(direction[1]) 
@@ -420,6 +451,7 @@ class Maze:
         if player == target:
             return [(player)]
         
+        WALKABLES = ('Enemy_Tile', 'Tile', 'Elevator', 'Glass_Tile')
         while len(paths) > 0 :
             
             current = paths.pop(-1)
@@ -438,7 +470,7 @@ class Maze:
                     cell = self.maze[y + dy][x + dx]
                     
                     if cell != None:
-                        if cell.type == 'Player_Tile':
+                        if cell.type not in WALKABLES:
                             continue
                         if cell.type != 'Elevator' and self.maze[y][x].type != 'Elevator':
                             if cell.z - self.maze[y][x].z not in dz or (x + dx, y + dy, cell.z) in visited:
@@ -493,8 +525,9 @@ class Maze:
                     paths.append(current + [pos])
         return []
 
-    def generate_gems(self):
-        locs = []
+    def generate_gems(self, gems:int, gemstones:int):
+        gem_locs = []
+        gemstone_locs = []
 
         GRID_WIDTH = 40
         GRID_HEIGHT = 40
@@ -520,17 +553,25 @@ class Maze:
                     nx, ny = x + dx, y + dy
                     
                     if cell_type((nx, ny), self):
-                        locs.append((nx, ny))
                         
-        return locs
+                        if len(self.maze[ny][nx].adjacent_cells) == 1 and len(gemstone_locs) < gemstones:
+                            gemstone_locs.append((nx,ny))
+                            self.maze[ny][nx].sprite = self.assets['Gem_Tile']
+                        elif len(gem_locs) < gems:   
+                            gem_locs.append((nx, ny))
+                        else:
+                            return gem_locs, gemstone_locs 
+                        
+        return gem_locs, gemstone_locs
 
 
     def get_tile_outline(self):
         grid_points = set() 
         for i,row in enumerate(self.maze):
             for j,tile in enumerate(row):
-                if cell_type((j,i), self) or cell_type((j,i), self, 'Player_Tile'):
-                    grid_points |= tile.get_outline()
+                if tile is not None:
+                    if tile.type in ('Tile', 'Player_Tile', 'Enemy_Tile'):
+                        grid_points |= tile.get_outline()
                     
         return grid_points
     
@@ -556,3 +597,19 @@ class Maze:
                         toVisit.append(pos)
             return spawn_points
         return []
+
+
+    def print_types(self, spacing=""):
+
+        for x in range(self.cols):
+            col = ""
+            for y in range(self.rows):
+                if self.maze[y][x] is not None:
+                    if self.maze[y][x].type == 'Enemy_Tile':
+                        col += 'e'
+                    else:
+                        col += self.maze[y][x].type[0]
+                else:
+                    col += "#"
+            print(col)
+        print(spacing, end="")
