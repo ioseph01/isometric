@@ -7,7 +7,7 @@ from scripts.utils import *
 NEIGHBORS = [(-1,0), (0,-1), (1,0), (0,1)]
 
 class Maze:
-    def __init__(self, game, width, height, color_table=None,
+    def __init__(self, game, width, height, gem_asset, color_table=None,
                  sprite_variant=None, stair_prob=0, room_attempts=0, sparsity=[0,0], elevator_prob=0,
                  friendlies_prob=0, enemies_prob=0, enemies_cooldown=None, glass_prob=0):
         self.game = game
@@ -16,7 +16,7 @@ class Maze:
         self.height = height
         self.TILE_WIDTH, self.TILE_HEIGHT = 20, 10
         self.WALL_HEIGHT = 4
-        self.WALL_SPACING = 4
+        self.WALL_SPACING = 8
         
         self.sprite_variant = sprite_variant
         self.init_settings = {
@@ -30,9 +30,10 @@ class Maze:
             'Player_Tile': [replace_colors(img, color_table) for img in load_images('player_tiles')],
             'Enemy_Tile': [replace_colors(img, color_table) for img in load_images('enemy_tiles')],
             'Glass_Tile': load_image('glass_tile.png'),
-            'Gem_Tile': replace_colors(load_image('gem_tile.png'), color_table),
+            'Plant_Tile': replace_colors(load_image('plant_tile.png'), color_table),
+            'Gem': gem_asset
         }
-
+        
       
 
         self.enemy_tile_cooldown = enemies_cooldown
@@ -43,7 +44,7 @@ class Maze:
         for i in range(10):
             self.init_settings['elevator_prob'] = max(i * 10 + elevator_prob, elevator_prob, 15)
             print("Attempt", i)
-            if self.trace([1,1], [self.width - 2, self.height - 2]) == []:
+            if not self.connectivity():
                 self.add_elevators(i * 10 + elevator_prob)
                 self.maze = self.fix_maze(self.maze)
             else:
@@ -434,7 +435,7 @@ class Maze:
         
 
 
-    def trace(self, player, target):
+    def trace(self, player, target, limit=1000):
         
         x,y = player
         target_x, target_y = target
@@ -449,9 +450,9 @@ class Maze:
             paths += [[(x, y, self.maze[y][x].z2)]]
         
         if player == target:
-            return [(player)]
+            return [(*player, self.maze[target[1]][target[0]].z1)]
         
-        WALKABLES = ('Enemy_Tile', 'Tile', 'Elevator', 'Glass_Tile')
+        WALKABLES = ('Enemy_Tile', 'Tile', 'Elevator', 'Glass_Tile', 'Plant_Tile')
         while len(paths) > 0 :
             
             current = paths.pop(-1)
@@ -461,6 +462,8 @@ class Maze:
                 return current
             
             visited.add((x, y, z))
+            if len(current) > limit:
+                continue
             
             toAdd = {}
             
@@ -509,10 +512,6 @@ class Maze:
                         toAdd[k].append((x,y,self.maze[y][x].z1))
                     
                     
-            # for key in reversed(dict(sorted(toAdd.items()))):
-            #     for val in random.sample(toAdd[key], len(toAdd[key])):
-            #         if val not in visited:
-            #             paths.append(current + [val])
             all_positions = [
                 (dist + random.random(), pos)
                 for dist, vals in toAdd.items()
@@ -527,7 +526,6 @@ class Maze:
 
     def generate_gems(self, gems:int, gemstones:int):
         gem_locs = []
-        gemstone_locs = []
 
         GRID_WIDTH = 40
         GRID_HEIGHT = 40
@@ -554,15 +552,12 @@ class Maze:
                     
                     if cell_type((nx, ny), self):
                         
-                        if len(self.maze[ny][nx].adjacent_cells) == 1 and len(gemstone_locs) < gemstones:
-                            gemstone_locs.append((nx,ny))
-                            self.maze[ny][nx].sprite = self.assets['Gem_Tile']
-                        elif len(gem_locs) < gems:   
+                        if len(gem_locs) < gems:   
                             gem_locs.append((nx, ny))
                         else:
-                            return gem_locs, gemstone_locs 
+                            return gem_locs
                         
-        return gem_locs, gemstone_locs
+        return gem_locs
 
 
     def get_tile_outline(self):
@@ -613,3 +608,24 @@ class Maze:
                     col += "#"
             print(col)
         print(spacing, end="")
+
+
+    def connectivity(self):
+        ALL = {(j.x, j.y) for row in self.maze for j in row if j is not None}
+        if not ALL:
+                return False
+        
+        visited = set()
+        toVisit = {(1,1)}
+        while toVisit:
+            x,y = toVisit.pop()
+            if (x, y) in visited:
+                continue
+            visited.add((x,y))
+            cell = self.maze[y][x]
+            for adjacent in cell.adjacent_cells:
+                if (adjacent.x, adjacent.y) not in visited:
+                    toVisit.add((adjacent.x, adjacent.y))
+                    
+        return ALL == visited
+        
