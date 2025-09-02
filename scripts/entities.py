@@ -1,5 +1,5 @@
-from scripts.utils import sign, to_iso
-from scripts.structures import Tile
+from scripts.utils import cell_type, cell_valid, get_cell_type, in_range, sign, to_iso
+from scripts.structures import Enemy_Tile, Player_Tile, Tile
 import pygame
 import random 
 
@@ -27,7 +27,9 @@ class Entity:
         self.movement_offset = [0,0]
         self.type = e_type
         self.flip = True
-        self.tick = [0,300]    
+        self.tick = 5
+        self.active = True
+        
 
     @property
     def at(self):
@@ -52,8 +54,6 @@ class Entity:
         x,y = self.render_pos
         screen.blit(pygame.transform.flip(self.sprite, self.flip, False), (x + offset[0] + self.render_offset[0] + self.movement_offset[0], int(y) + offset[1] + self.render_offset[1] + self.movement_offset[1]))
 
-        if self.type == 'Player':
-            print(x + offset[0] + self.render_offset[0] + self.movement_offset[0], int(y) + offset[1] + self.render_offset[1] + self.movement_offset[1])
 
     def update(self):
         pass
@@ -70,9 +70,19 @@ class Player(Entity):
     def __init__(self, game, pos, sprite, hp=1, render_offset=[0, 0], e_type=None):
         super().__init__(game, pos, sprite, hp, render_offset, e_type)
         self.idle = 0
-
+        self.stun = 0
+        self.action = 'idle'
+        
     def render(self, screen, offset):
-        screen.blit(pygame.transform.flip(self.sprite, self.flip, False), (100,63))
+        x,y = self.render_pos
+        x = int(x + offset[0] + self.render_offset[0] + self.movement_offset[0])
+        y = int(y + offset[1] + self.render_offset[1] + self.movement_offset[1])
+        if self.action == 'walking':
+            screen.blit(pygame.transform.flip(self.sprite.img(), self.flip, False), (x,y))
+        elif self.idle > 100:
+            screen.blit(pygame.transform.flip(self.sprite.img(), self.flip, False), (x,y))
+        else:
+            screen.blit(pygame.transform.flip(self.sprite.images[0], self.flip, False), (x,y))
 
     @property
     def next_in_path(self):
@@ -80,11 +90,17 @@ class Player(Entity):
             return None
         
         return self.path[0]
-    
+
 
     def update(self, tick, movement=[0,0,0,0]):
         
         if tick % 2 == 0:
+            
+            if self.stun > 0:
+                self.stun -= 1
+                return
+                    
+
             if self.at.type == 'Player_Tile':
                 self.at.deactivate()
             diff = [movement[1] - movement[3], movement[0] - movement[2]]
@@ -94,7 +110,13 @@ class Player(Entity):
             else:
                 old = diff
             if old != [0,0]:
-                self.idle = 100
+                self.idle = 0
+                if self.action == 'idle':
+                    self.sprite = self.game.assets['player/walking']
+                self.action = 'walking'
+                self.sprite.update()
+                
+                
                 diff = coord_transform(*old)
                 
                 if sign(diff[0]) == -1:
@@ -127,16 +149,24 @@ class Player(Entity):
                     self.movement_offset = move(self.movement_offset, *diff)
                     self.game.render_offset[0] -= self.movement_offset[0] - old[0]
                     self.game.render_offset[1] -= self.movement_offset[1] - old[1]
+                    
+
             else:
+                self.action = 'idle'
+                self.sprite = self.game.assets['player/idle']
                 if self.idle <= 0:
                     self.action = 'idle'
-                self.idle = max(self.idle - 1, 0)
+                elif self.idle > 100:
+                    self.sprite.update()
+                    
+                self.idle = min(self.idle + 1, 101)
 
 
 class Enemy(Entity):
+    
     @property
     def walkables(self):
-        return('Enemy_Tile', 'Elevator', 'Tile', 'Glass_Tile')
+        return('Enemy_Tile', 'Elevator', 'Tile', 'Glass_Tile', 'Plant_Tile')
 
     def greedy_move_toward_player(self):
         def cheb_dist(pos):
@@ -163,7 +193,6 @@ class Enemy(Entity):
         
     def goToNext(self, next_coord):
         cell, next_cell = self.at, self.game.maze.maze[next_coord[1]][next_coord[0]]
-        
         for z in next_cell.all_z:
             if z == next_coord[2]:
                 break
@@ -202,7 +231,7 @@ class Enemy(Entity):
                     self.pos = new_player
 
                 else:
-                    old = self.movement_offset
+                    # old = self.movement_offset
                     self.movement_offset = move(self.movement_offset, *diff)
                 
                 
@@ -210,18 +239,128 @@ class Enemy(Entity):
         if self.path is None or self.path == []:
             self.path = [self.greedy_move_toward_player()]
             if random.randint(0,100) == 0:
-                path = self.game.maze.trace(self.pos, self.game.player.pos)[:random.randint(15,50)]
+                path = self.game.maze.trace(self.pos, self.game.player.pos)[:random.randint(35,50)]
                 self.path = path if path is not None else self.path
-                print("HUNTING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        elif self.game.tick[0] % 5 == 0:
+                print("tracking player")
+        elif self.game.tick[0] % self.tick == 0:
             next_coord = self.path[0]
             if tuple(next_coord[:2]) in pos_dict:
                 if pos_dict[tuple(next_coord[:2])] is not self:
-                    self.path = []
-                    return
+                    if pos_dict[tuple(next_coord[:2])].active:
+                        self.path = []
+                        return
                
             old_pos = self.pos
             self.goToNext(next_coord)
             if self.pos != old_pos:
-                pos_dict.pop(tuple(old_pos))
+                if tuple(old_pos) in pos_dict:
+                    pos_dict.pop(tuple(old_pos))
                 pos_dict[tuple(self.pos)] = self
+                
+
+class Wisp(Enemy):
+    def __init__(self, game, pos, sprite, hp=1, render_offset=[0, 0], e_type=None):
+        super().__init__(game, pos, sprite, hp, render_offset, e_type)
+        self.tick = 2
+        self.animation = self.game.assets['Wisp']
+    
+    def render(self, screen, offset):
+        if self.active:
+            x,y = self.render_pos
+            screen.blit(pygame.transform.flip(self.animation.img(), self.flip, False), (x + self.render_offset[0] + self.movement_offset[0] + offset[0], y + self.render_offset[1] + self.movement_offset[1] + offset[1]))
+        else:
+            return super().render(screen, [offset[0], offset[1] - self.render_offset[1]])
+        
+    def deactivate(self):
+        self.active = False
+        self.path = []
+        
+    def update(self, pos_dict):
+        path = self.game.maze.trace(self.pos, self.game.player.pos, 10)
+        if abs(self.x + self.y - self.game.player.x - self.game.player.y) >= 10 and ((self.x, self.y) in self.game.gems or random.randint(0,100) <= 10):
+            self.deactivate()
+        elif len(self.path) > 0:
+            if self.path[-1][:2] == self.game.player.pos:
+                self.active = True
+        elif len(path) in range(1,6):
+            self.active = True
+            self.path = path
+        if self.active:
+            self.animation.update()
+            super().update(pos_dict)
+        
+
+class Plant(Enemy):
+    def __init__(self, game, pos, sprite, hp=1, render_offset=[0, 0], e_type=None):
+        super().__init__(game, pos, sprite, hp, render_offset, e_type)
+        self.tick = 6
+        self.sprite = self.game.assets['Plant/walking']
+     
+    @property
+    def action(self):
+        if self.active:
+            return 'walking'
+        return 'idle'
+        
+    def render(self, screen, offset):
+        x,y = self.render_pos
+        y = y + 2 if self.action == 'idle' else y
+        screen.blit(pygame.transform.flip(self.game.assets['Plant/' + self.action].img(), self.flip, False), (x + self.render_offset[0] + self.movement_offset[0] + offset[0], y + self.render_offset[1] + self.movement_offset[1] + offset[1]))
+        
+    def pot(self):
+        self.active = False
+        self.movement_offset = [0,0]
+        sprite = self.game.assets['Plant/idle']
+        if sprite != self.sprite:
+            self.sprite = sprite
+        else:
+            self.sprite.update()
+
+    def update(self, pos_dict):
+        sprite = self.sprite
+        if abs(self.x - self.game.player.x) < self.game.maze.w / 2 and abs(self.y - self.game.player.y) < self.game.maze.h / 3 and self.at.type == 'Plant_Tile':
+            if (self.x, self.y) in pos_dict:
+                if pos_dict[(self.x, self.y)] is self:
+                    self.pot()
+                    return
+            else:
+                self.pot()
+                return
+            
+        self.active = True
+        sprite = self.game.assets['Plant/walking']
+        if sprite != self.sprite:
+            self.sprite = sprite
+        else:
+            self.sprite.update()
+        super().update(pos_dict)
+            
+        
+
+class Converter(Enemy):
+    def __init__(self, game, pos, sprite, hp=1, render_offset=[0, 0], e_type=None):
+        super().__init__(game, pos, sprite, hp, render_offset, e_type)
+        self.variant = 0
+    
+    def render(self, screen, offset):
+        x,y = self.render_pos
+        if self.path != []:
+            _sign = sign(self.path[0][0] - self.x) if sign(self.path[0][0] - self.x) != 0 else sign(self.path[0][1] - self.y) 
+            if _sign < 0 :
+                self.variant = 1
+            elif _sign > 0:
+                self.variant = 0
+
+        screen.blit(pygame.transform.flip(self.sprite[self.variant], self.flip, False), (x + self.render_offset[0] + self.movement_offset[0] + offset[0], y + self.render_offset[1] + self.movement_offset[1] + offset[1]))
+        
+
+    def update(self, pos_dict):
+        if self.at.type == 'Tile' and self.movement_offset == [0,0]:
+            if self.at.player_tile:
+                for tile in self.at.adjacent_cells | {self.at}:
+                    if tile.type == 'Tile':
+                        if tile.player_tile:
+                            self.game.maze.maze[tile.y][tile.x] = Enemy_Tile(self.game.maze, tile.z, tile.x, tile.y, cooldown=None)
+                self.hp = 0
+                return
+        super().update(pos_dict)
