@@ -12,13 +12,14 @@ def reduce_coord(x, y):
         
     
 class Tile:
-    def __init__(self, maze, z, x, y):
+    def __init__(self, maze, z, x, y, player_tile=False):
         self.maze = maze
         self.pos = z
         self.x, self.y = x, y
         sprite_variant = self.maze.sprite_variant if self.maze.sprite_variant is not None else stable_randint(x, y, z, self.maze.game.level)
         sprite = self.type
         self.sprite = self.maze.assets[sprite][sprite_variant]
+        self.player_tile = player_tile
        
     @property
     def z(self):
@@ -198,7 +199,6 @@ class Glass_Tile(Tile):
     
     def deactive(self):
         self.time = 600
-        print("GN!")
     
     @property
     def active(self):
@@ -214,7 +214,7 @@ class Glass_Tile(Tile):
         if self.active:
             x,y = self.render_pos
             screen.blit(self.sprite, (x + offset[0], y + offset[1]), special_flags=pygame.BLEND_ALPHA_SDL2)
-            screen.blit(self.sprite_grid, (x + offset[0], y + offset[1]))
+            # screen.blit(self.sprite_grid, (x + offset[0], y + offset[1]))
         
 
 class Player_Tile(Tile):
@@ -240,7 +240,7 @@ class Player_Tile(Tile):
             
         if not self.active:
             if self.time <= 0:
-                self.maze.maze[self.y][self.x] = Tile(self.maze, self.z1, self.x, self.y)
+                self.maze.maze[self.y][self.x] = Tile(self.maze, self.z1, self.x, self.y, player_tile=True)
                 self.maze.maze[self.y][self.x].sprite = self.sprite
                 
             else:
@@ -270,8 +270,10 @@ class Enemy_Tile(Tile):
     def update(self):
         if self.cooldown is not None:
             if abs(self.time) == 1:
-                if self.maze.game.player.pos != [self.x, self.y]:
-                    self.time = -self.time * self.cooldown
+                if self.maze.game.player.pos == [self.x, self.y] and self.maze.game.player.flying <= 0:
+                    self.maze.game.player.stun = 10
+                self.time = -self.time * self.cooldown
+                    
                     
                     
             else:
@@ -288,11 +290,16 @@ class Enemy_Tile(Tile):
         screen.blit(sprite, (x + offset[0], y + offset[1]))
 
         
-class Gem_Tile(Tile):
+class Plant_Tile(Tile):
     
     def __init__(self, maze, z, x, y):
         self.maze = maze
         self.maze = maze
         self.pos = z
         self.x, self.y = x, y
-        self.sprite = self.maze.assets['Gem_Tile']
+        self.sprite = self.maze.assets['Plant_Tile']
+        self.occupied = False
+        
+    @property
+    def type(self):
+        return 'Plant_Tile'
