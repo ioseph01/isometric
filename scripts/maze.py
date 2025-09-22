@@ -1,7 +1,8 @@
 import pygame
 import random
 from noise import pnoise2
-from scripts.structures import Elevator, Enemy_Tile, Glass_Tile, Player_Tile, Tile
+from scripts.animation import Animation
+from scripts.structures import Elevator, Enemy_Tile, Glass_Tile, Player_Tile, Tile, structures_factory
 from scripts.utils import *
 
 NEIGHBORS = [(-1,0), (0,-1), (1,0), (0,1)]
@@ -9,13 +10,13 @@ NEIGHBORS = [(-1,0), (0,-1), (1,0), (0,1)]
 class Maze:
     def __init__(self, game, width, height, gem_asset, color_table=None,
                  sprite_variant=None, stair_prob=0, room_attempts=0, sparsity=[0,0], elevator_prob=0,
-                 friendlies_prob=0, enemies_prob=0, enemies_cooldown=None, glass_prob=0):
+                 friendlies_prob=0, enemies_prob=0, enemies_cooldown=None, glass_prob=0, wall_height=1):
         self.game = game
         self.maze = self.create_maze(width, height)
         self.width = width 
         self.height = height
         self.TILE_WIDTH, self.TILE_HEIGHT = 20, 10
-        self.WALL_HEIGHT = 4
+        self.WALL_HEIGHT = wall_height
         self.WALL_SPACING = 8
         
         self.sprite_variant = sprite_variant
@@ -31,20 +32,26 @@ class Maze:
             'Enemy_Tile': [replace_colors(img, color_table) for img in load_images('enemy_tiles')],
             'Glass_Tile': load_image('glass_tile.png'),
             'Plant_Tile': replace_colors(load_image('plant_tile.png'), color_table),
-            'Gem': gem_asset
+            'Portal_Tile_': Animation([replace_colors(img, color_table) for img in load_images('portal_tiles/active')], img_dur=30),
+            'Portal_Tile': replace_colors(load_image('portal_tiles/off/0.png'), color_table),
+            'Gem': gem_asset,
+            'Temp_Tile': replace_colors(load_image('elevators/0.png'), color_table)
         }
-        
+        self.render_counter = 0
       
 
         self.enemy_tile_cooldown = enemies_cooldown
         self.maze = self.generate_rooms(room_attempts)
-        self.maze = self.combine(self.carve(self.maze, stair_prob=stair_prob), self.carve(self.create_maze(self.width, self.height)), sparsity=sparsity, friendlies_prob=friendlies_prob, enemies_prob=enemies_prob, glass_prob=glass_prob)
+        self.combine(self.carve(self.maze, stair_prob=stair_prob), self.carve(self.create_maze(self.width, self.height)), sparsity=sparsity, friendlies_prob=friendlies_prob, enemies_prob=enemies_prob, glass_prob=glass_prob)
         self.maze = self.fix_maze(self.maze)
         self.add_elevators(elevator_prob)
+        
         for i in range(10):
             self.init_settings['elevator_prob'] = max(i * 10 + elevator_prob, elevator_prob, 15)
+            # self.maze = self.fix_maze(self.maze)
+            
             print("Attempt", i)
-            if not self.connectivity():
+            if not self.connectivity() or self.trace((1,1), (self.width - 2, self.height - 2)) == []:
                 self.add_elevators(i * 10 + elevator_prob)
                 self.maze = self.fix_maze(self.maze)
             else:
@@ -247,20 +254,30 @@ class Maze:
 
 
     def fix_maze(self, maze):
-        def factory(e_type, z, x, y):
-            if e_type == 'Tile':
-                return Tile(self, z, x, y)
-            elif e_type == 'Glass_Tile':
-                return Glass_Tile(self, z, x, y)
-            elif e_type == 'Player_Tile':
-                return Player_Tile(self, z, x, y)
-            elif e_type == 'Enemy_Tile':
-                return Enemy_Tile(self, z, x, y, self.enemy_cooldown(x,y))
-
+        def check(a,b, comparator=max):
+            coords = []
+            if a is not None:
+                coords.append(a)
+            if b is not None:
+                coords.append(b)
+            if len(coords) <= 0:
+                return None
+            return comparator(coords)
+            
         for row_i, row in enumerate(maze):
             for cell_i, cell in enumerate(row):
                 if cell is not None:
-                        
+                    if cell.type == 'Elevator':
+                        top = check(cell.get_neighbor(-1,0), cell.get_neighbor(0,-1),min)
+                        bottom = check(cell.get_neighbor(1,0), cell.get_neighbor(0,1),max)
+                        if top is not None and bottom is not None:
+                            cell.pos = top.all_z[-1]
+                            cell.other_z = bottom.z1
+                        elif bottom is None:    
+                            self.maze[row_i][cell_i] = Tile(self, cell.z1, cell_i, row_i)
+                        else:
+                            self.maze[row_i][cell_i] = Tile(self, cell.z2, cell_i, row_i)
+                               
                     for dx in range(-1,100):
                     
                         dy = dx + 1 if dx > -1 else 1
@@ -270,25 +287,27 @@ class Maze:
                         if (a:= in_range([cell_i + dx, row_i + dy], self)):
                             to_check = maze[row_i + dy][cell_i + dx]
                             if to_check is not None:
-                                if to_check.z - cell.z > dz - 1:
+                                if to_check.z - cell.z > dz - 1 and cell.type != 'Elevator':
                                     # maze[row_i + dy][cell_i + dx] = Tile(self, max(0, cell.z + dz - offset - random.choice([1,2,2,2,2,2])), cell_i + dx, row_i + dy)
-                                    maze[row_i + dy][cell_i + dx] = factory(cell.type, max(0, cell.z + dz - offset - random.choice([1,2,2,2,2,2])), cell_i + dx, row_i + dy)
+                                    maze[row_i + dy][cell_i + dx] = structures_factory(self, cell.type, max(0, cell.z + dz - offset - random.choice([1,2,2,2,2,2])), cell_i + dx, row_i + dy)
                             
                         if (b:= in_range([cell_i + dy, row_i + dx], self)):
                             to_check = maze[row_i + dx][cell_i + dy]
                             if to_check is not None:
-                                if to_check.z - cell.z > dz - 1:
-                                    maze[row_i + dx][cell_i + dy] = factory(cell.type, max(0, cell.z + dz - offset - random.choice([1,2,2,2,2,2])), cell_i + dy, row_i + dx)
+                                if to_check.z - cell.z > dz - 1  and cell.type != 'Elevator':
+                                    maze[row_i + dx][cell_i + dy] = structures_factory(self, cell.type, max(0, cell.z + dz - offset - random.choice([1,2,2,2,2,2])), cell_i + dy, row_i + dx)
                         if not a and not b:
                             break
+                        
+
              
         self.maze = maze
         # if self.settings['friendlies_prob'] >= 50 or self.settings['enemies_prob'] >= 50:
         if self.trace((1,1), (self.w - 2, self.h - 2)) != []:
             for px, py, pz in self.trace((1,1), (self.w - 2, self.h - 2)) + self.trace((self.w - 2, self.h - 2), (1,1)):
                 cell = self.maze[py][px]
-                if cell.type == 'Enemy_Tile':
-                    self.maze[py][px] = random.choices([factory('Tile', pz, px, py), factory('Glass_Tile', pz, px, py)], weights=[80,5], k=1)[0]
+                if cell.type in ('Enemy_Tile', 'Player_Tile'):
+                    self.maze[py][px] = random.choices([structures_factory(self, 'Tile', pz, px, py), structures_factory(self, 'Glass_Tile', pz, px, py)], weights=[80,5], k=1)[0]
                         
         return self.maze
 
@@ -330,7 +349,7 @@ class Maze:
 
     
 
-    def combine(self, layout, other, sparsity, friendlies_prob=0, enemies_prob=0, glass_prob=0):
+    def combine(self, layout, other, sparsity, friendlies_prob=0, enemies_prob=0, glass_prob=0, preserve_current=False):
         
         def makeTile(z,x,y):
             return Tile(self, z,x,y)
@@ -346,10 +365,13 @@ class Maze:
         
         
         if sparsity == [0,0]:
-            return layout
+            return
         
+        new_tiles = []
         for y in range(1, len(other) - 1):
             for x in range(1, len(layout[y]) - 1):
+                if preserve_current and self.maze[y][x] is not None:
+                            continue
                 tile = makeTile
                 if (layout[y][x] is None or None is other[y][x]):
                     if random.randint(0,100) < sparsity[0]:
@@ -362,11 +384,12 @@ class Maze:
                             tile = makeEnemyTile
                         for z in [layout[y][x], layout[y - 1][x], layout[y][x - 1]]:
                             if z is not None:
-                                layout[y][x] = tile(z.z, x, y)
+                                layout[y][x] = tile(z.z1, x, y)
                                 break
                         continue
                             
                     if x != 0 and x != len(layout[0]) - 1 and y != 0 and y != len(layout) - 1 and x % 2 != 1 and y % 2 != 1:
+                        
                         if random.randint(0,100) < sparsity[1]:
                             tile = makeTile
                             if random.randint(0,100) < glass_prob:
@@ -378,23 +401,40 @@ class Maze:
                             
                             for z in [layout[y][x - 1], layout[y - 1][x]]:
                                 if z is not None:
-                                    layout[y][x] = tile(z.z, x, y)
+                                    layout[y][x] = tile(z.z1, x, y)
                                     break
     
-        return layout
+        self.maze = layout
+        return new_tiles
 
     
 
     def draw_map(self, screen, offset=(0,0), entities={}, border_layer=None, paused=False):
         ''' Maze render function '''
-
+        counter = 0
         for y in range(self.h):
             for x in range(self.w):
+                if counter >= self.render_counter:
+                    self.render_counter += 1
+                    return
                 tile = self.maze[y][x]
                 if tile is not None:
-                    if not paused:
+                    
+                    if not paused and self.w*self.h <= self.render_counter:
                         tile.update()
-                    tile.render(screen, self.WALL_HEIGHT, offset, self.WALL_SPACING)
+                    wall_height = self.WALL_HEIGHT * 2 if self.WALL_HEIGHT is not None else (1+(x*y*(tile.z1 + 1))%4) * 4
+                    tile.render(screen, wall_height, offset, self.WALL_SPACING)
+                    if (x,y) in entities:
+                        for e in entities[(x,y)]:
+                            e.render(screen, offset)
+                            
+                    for nx, ny in tile.back_neighbors:
+                        if (nx,ny) in entities:
+                            if self.maze[ny][nx].z <= tile.z:
+                                for entity in entities[(nx,ny)]:
+                                    entity.render(screen, offset)
+                counter += 1
+                    
 
 
     def border_check(self, player, direction):
@@ -452,7 +492,7 @@ class Maze:
         if player == target:
             return [(*player, self.maze[target[1]][target[0]].z1)]
         
-        WALKABLES = ('Enemy_Tile', 'Tile', 'Elevator', 'Glass_Tile', 'Plant_Tile')
+        WALKABLES = ('Enemy_Tile', 'Tile', 'Elevator', 'Glass_Tile', 'Plant_Tile', 'Temp_Tile')
         while len(paths) > 0 :
             
             current = paths.pop(-1)
@@ -525,8 +565,9 @@ class Maze:
         return []
 
     def generate_gems(self, gems:int, gemstones:int):
-        gem_locs = []
-
+        gem_locs = set()
+        gemstone_locs = set()
+        
         GRID_WIDTH = 40
         GRID_HEIGHT = 40
 
@@ -549,26 +590,27 @@ class Maze:
                     dx = int(random.gauss(0, 2))
                     dy = int(random.gauss(0, 2))
                     nx, ny = x + dx, y + dy
+                    if (nx,ny) == (1,1) or (nx,ny) == (self.w - 2, self.h - 2):
+                        continue
                     
                     if cell_type((nx, ny), self):
-                        
-                        if len(gem_locs) < gems:   
-                            gem_locs.append((nx, ny))
+                        if 1 == len(self.maze[ny][nx].adjacent_cells) and len(gemstone_locs) < gemstones:
+                            gemstone_locs.add((nx,ny))
+                        elif len(gem_locs) < gems:   
+                            gem_locs.add((nx, ny))
                         else:
-                            return gem_locs
+                            return gem_locs, gemstone_locs
                         
-        return gem_locs
+        return gem_locs, gemstone_locs
 
 
-    def get_tile_outline(self):
-        grid_points = set() 
+    def set_tile_outline(self):
         for i,row in enumerate(self.maze):
             for j,tile in enumerate(row):
                 if tile is not None:
-                    if tile.type in ('Tile', 'Player_Tile', 'Enemy_Tile'):
-                        grid_points |= tile.get_outline()
-                    
-        return grid_points
+                    if tile.type in ('Tile', 'Player_Tile', 'Enemy_Tile', 'Plant_Tile', 'Portal_Tile'):
+                        tile.init_outline()
+
     
 
     def get_spawnpoints(self, x, y, count):
@@ -582,12 +624,14 @@ class Maze:
                     continue
                 cell = self.maze[cy][cx]
                 visited.add((cx,cy))
-                for dx,dy in NEIGHBORS:
-                    pos = (dx + cx, dy + cy)
-                    if cell_type(pos, self, 'Tile') and pos not in spawn_points:
-                        spawn_points.add(pos)
-                        if len(spawn_points) >= count:
-                            return spawn_points
+                for next_cell in cell.adjacent_cells:
+                    pos = (next_cell.x, next_cell.y)
+                    
+                    if pos not in spawn_points:
+                        if next_cell.type in ('Tile', 'Plant_Tile', 'Glass_Tile'):
+                            spawn_points.add((next_cell.x, next_cell.y))
+                            if len(spawn_points) >= count:
+                                return spawn_points
                     if pos not in visited:
                         toVisit.append(pos)
             return spawn_points
