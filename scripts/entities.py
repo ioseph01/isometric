@@ -1,5 +1,6 @@
+from scripts.maze import NEIGHBORS
 from scripts.utils import cell_type, cell_valid, get_cell_type, in_range, sign, to_iso
-from scripts.structures import Enemy_Tile, Player_Tile, Tile
+from scripts.structures import Enemy_Tile, Player_Tile, Tile, structures_factory
 import pygame
 import random 
 
@@ -16,6 +17,23 @@ def coord_transform(x,y):
     result = [-2*x + 2*y, x + y]
     return [-2*x + 2*y, x + y]
 
+def change_color(img, color):
+        mask = pygame.mask.from_surface(img)
+        mask = mask.to_surface(unsetcolor=(0, 0, 0, 0), setcolor=(*color, 255))
+        eyes = []
+        for x in range(img.get_width()):
+            for y in range(img.get_height()):
+                if img.get_at((x,y)) == (251,255,235,255):
+                    eyes.append((x,y))
+
+        for ix,iy in eyes:
+            mask.fill((251,255,235),(ix,iy,1,1))
+        return mask
+
+colors = [
+        (255,0,77),(255,108,36),(255,236,39),(0,228,54),(6,90,181),(126,37,83)
+    ]
+
 class Entity:
     def __init__(self, game, pos, sprite, hp=1, render_offset=[0,0], e_type=None):
         self.game = game
@@ -26,10 +44,14 @@ class Entity:
         self.render_offset = render_offset
         self.movement_offset = [0,0]
         self.type = e_type
-        self.flip = True
-        self.tick = 5
+        self.flip = False
+        self.tick = 8
         self.active = True
-        
+        self.gems = 0
+
+    @property
+    def img(self):
+        return self.sprite
 
     @property
     def at(self):
@@ -58,8 +80,43 @@ class Entity:
     def update(self):
         pass
         
+class Gemstone(Entity):
+    def __init__(self, game, pos, sprite, hp=1, render_offset=[0, 0], e_type=None):
+        super().__init__(game, pos, sprite, hp, render_offset, e_type)
+        self.tick = [0,200]
 
+    def update(self):
+        self.tick[0] = (self.tick[0] + 1) % self.tick[1]
+        if self.pos == self.game.player.pos:
+            self.hp = 0
+            self.game.player.invincibility = min(70 + self.game.level + (5 - self.game.lives) * 2, 120)
+            
+    def render(self, screen, offset):
+        i = (self.tick[0] % (20 * len(colors))) // 20
+        img = change_color(self.sprite,colors[i])
+        x,y = self.render_pos
+        screen.blit(pygame.transform.flip(img, self.flip, False), (x + offset[0] + self.render_offset[0] + self.movement_offset[0], int(y) + offset[1] + self.render_offset[1] + self.movement_offset[1]))
+
+
+class Trap(Entity):
+    def __init__(self, game, pos, sprite, hp=1, render_offset=[0, 0], e_type=None):
+        super().__init__(game, pos, sprite, hp, render_offset, e_type)
+        self.hp = 100
+        self.tick = [0,10]
+    
+    def update(self):
+        self.tick[0] = (self.tick[0] + 1) % self.tick[1]
+        if self.tick[0] % self.tick[1] == 0:
+            self.hp -= 1
+        if self.pos == self.game.player.pos:
+            if self.game.player.invincibility <= 0:
+                self.game.player.stun += 4
+                self.game.player.gems = max(0, self.game.player.gems - 1)
+            self.hp = 0
+            
+    
 class Gem(Entity):
+
     def update(self):
         if self.pos == self.game.player.pos:
             self.hp = 0
@@ -71,19 +128,61 @@ class Player(Entity):
         super().__init__(game, pos, sprite, hp, render_offset, e_type)
         self.idle = 0
         self.stun = 0
+        self.egg = None
+        self.egg_offset = [0,0]
         self.action = 'idle'
+        self.invincibility = 0
+        self.tick = 2
+        self.cooldown = 10
         
+    def reset(self):
+        self.path = []
+        self.idle = 0
+        self.stun = 0
+        self.egg = None
+        self.movement_offset = [0,0]
+        self.invincibility = 0
+
+    def create_egg(self):
+        if self.at.type not in ('Glass_Tile','Enemy_Tile') and self.gems >= self.cooldown:
+            self.egg_offset = self.movement_offset    
+            self.egg = self.pos
+            self.gems -= self.cooldown
+            
+    def destroy_egg(self):
+        if self.egg is not None:
+            self.pos = self.egg
+            self.game.render_offset = self.game.test()
+            
+        self.egg = None
+        
+    @property
+    def img(self):
+        if self.action == 'walking' or self.idle > 100:
+            return self.sprite.img()
+        return self.sprite.images[0]
+
     def render(self, screen, offset):
         x,y = self.render_pos
-        x = int(x + offset[0] + self.render_offset[0] + self.movement_offset[0])
-        y = int(y + offset[1] + self.render_offset[1] + self.movement_offset[1])
-        if self.action == 'walking':
-            screen.blit(pygame.transform.flip(self.sprite.img(), self.flip, False), (x,y))
-        elif self.idle > 100:
-            screen.blit(pygame.transform.flip(self.sprite.img(), self.flip, False), (x,y))
-        else:
-            screen.blit(pygame.transform.flip(self.sprite.images[0], self.flip, False), (x,y))
+        x += offset[0] + self.movement_offset[0] + self.render_offset[0]
+        y += offset[1] + self.movement_offset[1] + self.render_offset[1]
+        if self.action == 'walking' or self.idle > 0:
+            img = self.sprite.img()
+            if self.invincibility > 0:
+            
+                img = change_color(img, colors[self.game.tick[0] % len(colors)])
 
+            screen.blit(pygame.transform.flip(img, self.flip, False), (x,y))
+        # elif self.idle > 100:
+        #     screen.blit(pygame.transform.flip(self.sprite.img(), self.flip, False), (x,y))
+        else:
+            img = self.sprite.images[1]
+            if self.invincibility > 0:
+                img = change_color(img, colors[self.game.tick[0] % len(colors)])
+
+            screen.blit(pygame.transform.flip(img, self.flip, False), (x,y))
+           
+            
     @property
     def next_in_path(self):
         if self.path == [] or self.path is None:
@@ -93,10 +192,12 @@ class Player(Entity):
 
 
     def update(self, tick, movement=[0,0,0,0]):
-        
-        if tick % 2 == 0:
-            
-            if self.stun > 0:
+        if tick % self.tick == 0:
+            if self.invincibility > 0:
+                self.invincibility -= 1
+                self.stun = 0
+
+            elif self.stun > 0:
                 self.stun -= 1
                 return
                     
@@ -130,15 +231,15 @@ class Player(Entity):
                     if next_cell.type == 'Glass_Tile':
                         if not next_cell.active:
                             return
-                    elif next_cell.type == 'Enemy_Tile':
+                    elif next_cell.type == 'Enemy_Tile' and self.invincibility <= 0:
                         if next_cell.active:
                             return
 
                     if self.pos != new_player:
                         old = self.movement_offset
                         self.movement_offset = move(self.movement_offset, *diff)
-                        self.game.render_offset[0] -= diff[0]
-                        self.game.render_offset[1] -= diff[1] + diff2[1] - 5 * sign(diff2[1])
+                        # self.game.render_offset[0] -= diff[0]
+                        # self.game.render_offset[1] -= diff[1] + diff2[1] - 5 * sign(diff2[1])
                         if self.at.type == 'Glass_Tile':
                             self.game.maze.maze[self.y][self.x].deactive()
                     
@@ -147,8 +248,8 @@ class Player(Entity):
                 else:
                     old = self.movement_offset
                     self.movement_offset = move(self.movement_offset, *diff)
-                    self.game.render_offset[0] -= self.movement_offset[0] - old[0]
-                    self.game.render_offset[1] -= self.movement_offset[1] - old[1]
+                    # self.game.render_offset[0] -= self.movement_offset[0] - old[0]
+                    # self.game.render_offset[1] -= self.movement_offset[1] - old[1]
                     
 
             else:
@@ -166,7 +267,7 @@ class Enemy(Entity):
     
     @property
     def walkables(self):
-        return('Enemy_Tile', 'Elevator', 'Tile', 'Glass_Tile', 'Plant_Tile')
+        return('Enemy_Tile', 'Elevator', 'Tile', 'Glass_Tile', 'Plant_Tile', 'Portal_Tile', 'Temp_Tile')
 
     def greedy_move_toward_player(self):
         def cheb_dist(pos):
@@ -263,6 +364,12 @@ class Wisp(Enemy):
         super().__init__(game, pos, sprite, hp, render_offset, e_type)
         self.tick = 2
         self.animation = self.game.assets['Wisp']
+        
+    @property
+    def img(self):
+        if self.active:
+            return self.animation.img()
+        return self.sprite
     
     def render(self, screen, offset):
         if self.active:
@@ -276,16 +383,22 @@ class Wisp(Enemy):
         self.path = []
         
     def update(self, pos_dict):
-        path = self.game.maze.trace(self.pos, self.game.player.pos, 10)
-        if abs(self.x + self.y - self.game.player.x - self.game.player.y) >= 10 and ((self.x, self.y) in self.game.gems or random.randint(0,100) <= 10):
-            self.deactivate()
-        elif len(self.path) > 0:
-            if self.path[-1][:2] == self.game.player.pos:
+         x,y = self.render_pos
+         x += int(self.game.render_offset[0]) + self.movement_offset[0] + self.render_offset[0]
+         y += int(self.game.render_offset[1]) + self.movement_offset[1] + self.render_offset[1]
+         if x not in range(0, self.game.display.get_width()) or y not in range(0,self.game.display.get_height()):
+             self.active = True
+         else:
+            path = self.game.maze.trace(self.pos, self.game.player.pos, 10)
+            if abs(self.x + self.y - self.game.player.x - self.game.player.y) >= 10 and ((self.x, self.y) in self.game.gems or random.randint(0,100) <= 10):
+                self.deactivate()
+            elif len(self.path) > 0:
+                if self.path[-1][:2] == self.game.player.pos:
+                    self.active = True
+            elif len(path) in range(1,6):
                 self.active = True
-        elif len(path) in range(1,6):
-            self.active = True
-            self.path = path
-        if self.active:
+                self.path = path
+         if self.active:
             self.animation.update()
             super().update(pos_dict)
         
@@ -293,7 +406,7 @@ class Wisp(Enemy):
 class Plant(Enemy):
     def __init__(self, game, pos, sprite, hp=1, render_offset=[0, 0], e_type=None):
         super().__init__(game, pos, sprite, hp, render_offset, e_type)
-        self.tick = 6
+        self.tick = 4
         self.sprite = self.game.assets['Plant/walking']
      
     @property
@@ -301,6 +414,10 @@ class Plant(Enemy):
         if self.active:
             return 'walking'
         return 'idle'
+    
+    @property
+    def img(self):
+        return self.game.assets['Plant/' + self.action].img()
         
     def render(self, screen, offset):
         x,y = self.render_pos
@@ -342,6 +459,11 @@ class Converter(Enemy):
         super().__init__(game, pos, sprite, hp, render_offset, e_type)
         self.variant = 0
     
+
+    @property
+    def img(self):
+        return self.sprite[0]
+
     def render(self, screen, offset):
         x,y = self.render_pos
         if self.path != []:
@@ -363,4 +485,87 @@ class Converter(Enemy):
                             self.game.maze.maze[tile.y][tile.x] = Enemy_Tile(self.game.maze, tile.z, tile.x, tile.y, cooldown=None)
                 self.hp = 0
                 return
+        super().update(pos_dict)
+
+
+class Constructor(Enemy):
+    def __init__(self, game, pos, sprite, hp=1, render_offset=[0, 0], e_type=None):
+        super().__init__(game, pos, sprite, hp, render_offset, e_type)
+        self.tick = 5
+        self.cooldown = [0,1000 - min(970, 10 * self.game.level)]
+        
+    def random_step(self, dx, dy):
+        options = []
+        if dx > 0:
+            options.append((1, 0))
+        elif dx < 0:
+            options.append((-1, 0)) 
+        if dy > 0:
+            options.append((0, 1))
+        elif dy < 0:
+            options.append((0, -1)) 
+        if not options:
+            return (0, 0)  
+
+        return random.choice(options)
+        
+    def update(self, pos_dict):
+        def neighbor_check(tile):
+            a = tile.get_accessible_neighbor(1,0)
+            if a is not None:
+                if a.z1 > tile.z1:
+                    return False
+            a = tile.get_accessible_neighbor(0,1)
+            if a is not None:
+                if a.z1 > tile.z1:
+                    return False   
+            b = tile.get_accessible_neighbor(-1,0)
+            if b is not None:
+                if b.all_z[-1] < tile.z1:
+                    return False   
+            b = tile.get_accessible_neighbor(0,-1)
+            if b is not None:
+                if b.all_z[-1] < tile.z1:
+                    return False  
+            c = self.game.maze.maze[tile.y + 1][tile.x + 1]
+            if c is not None:
+                if c.z1 > tile.all_z[-1]:
+                    return False
+            c = self.game.maze.maze[tile.y - 1][tile.x - 1]
+            if c is not None:
+                if c.all_z[-1] < tile.z1:
+                    return False
+            return True
+
+        self.cooldown[0] = min(self.cooldown[0] + 1, self.cooldown[1])
+        if self.gems >= 2 or self.cooldown[0] == self.cooldown[1]:
+            nx,ny = self.random_step(self.game.player.x - self.x, self.game.player.y - self.y)
+            px,py = nx + self.x, ny + self.y
+            
+            if self.at.get_accessible_neighbor(nx,ny) is None:
+                if not cell_valid((px,py), self.game.maze):
+                    self.game.maze.maze[py][px] = structures_factory(self.game.maze, 'Temp_Tile', self.at.z1, px,py)
+                    if neighbor_check(self.game.maze.maze[py][px]):
+                        self.gems = max(self.gems - 2, 0)   
+                        self.cooldown[0] = 0
+                    else:
+                        self.game.maze.maze[py][px] = None
+            
+        super().update(pos_dict)
+        self.flip = False
+        
+
+class Trapper(Enemy):
+    def __init__(self, game, pos, sprite, hp=1, render_offset=[0, 0], e_type=None):
+        super().__init__(game, pos, sprite, hp, render_offset, e_type)
+        self.capcacity = max(10, self.game.level)
+
+    def lay_trap(self):
+        if len(self.game.traps) < self.capcacity and abs(self.x - self.game.player.x) < 10 and abs(self.y - self.game.player.y) < 10:
+            if (self.x, self.y) not in self.game.traps and self.at.type in ('Tile', 'Temp_Tile', 'Elevator'):
+                self.game.traps[(self.x,self.y)] = Trap(self.game, self.pos, self.game.assets['Trap'])
+                print("TRAP")
+
+    def update(self, pos_dict):
+        self.lay_trap()
         super().update(pos_dict)
