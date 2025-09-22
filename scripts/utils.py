@@ -109,3 +109,4 @@ def get_border_points():
 def get_cell_type(pos, maze):
     if cell_valid(pos, maze):
         return maze.maze[pos[1]][pos[0]].type
+    return None    
