@@ -1,0 +1,5 @@
+[pygbag]
+assets = [
+    "data/img",
+    "scripts"
+]
