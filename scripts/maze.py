@@ -1,6 +1,6 @@
 import pygame
 import random
-from noise import pnoise2
+from scripts.noise import pnoise2
 from scripts.animation import Animation
 from scripts.structures import Elevator, Enemy_Tile, Glass_Tile, Player_Tile, Tile, structures_factory
 from scripts.utils import *
@@ -25,18 +25,7 @@ class Maze:
             'sparsity setting': sparsity, 'elevator_prob': elevator_prob, 'friendlies_prob': friendlies_prob, 'enemies_prob': enemies_prob,
             'glass_prob': glass_prob
             }
-        self.assets = {
-            'Tile': [replace_colors(img, color_table) for img in load_images('tiles')],
-            'Elevator': [replace_colors(img, color_table) for img in load_images('elevators')],
-            'Player_Tile': [replace_colors(img, color_table) for img in load_images('player_tiles')],
-            'Enemy_Tile': [replace_colors(img, color_table) for img in load_images('enemy_tiles')],
-            'Glass_Tile': load_image('glass_tile.png'),
-            'Plant_Tile': replace_colors(load_image('plant_tile.png'), color_table),
-            'Portal_Tile_': Animation([replace_colors(img, color_table) for img in load_images('portal_tiles/active')], img_dur=30),
-            'Portal_Tile': replace_colors(load_image('portal_tiles/off/0.png'), color_table),
-            'Gem': gem_asset,
-            'Temp_Tile': replace_colors(load_image('elevators/0.png'), color_table)
-        }
+        self.load_assets(color_table, gem_asset)
         self.render_counter = 0
       
 
@@ -49,8 +38,6 @@ class Maze:
         for i in range(10):
             self.init_settings['elevator_prob'] = max(i * 10 + elevator_prob, elevator_prob, 15)
             # self.maze = self.fix_maze(self.maze)
-            
-            print("Attempt", i)
             if not self.connectivity() or self.trace((1,1), (self.width - 2, self.height - 2)) == []:
                 self.add_elevators(i * 10 + elevator_prob)
                 self.maze = self.fix_maze(self.maze)
@@ -92,6 +79,20 @@ class Maze:
 
     def dim(self):
         return (self.width, self.height)
+    
+    def load_assets(self, color_table, gem_asset):
+        self.assets = {
+            'Tile': [replace_colors(img, color_table) for img in load_images('tiles')],
+            'Elevator': [replace_colors(img, color_table) for img in load_images('elevators')],
+            'Player_Tile': [replace_colors(img, color_table) for img in load_images('player_tiles')],
+            'Enemy_Tile': [replace_colors(img, color_table) for img in load_images('enemy_tiles')],
+            'Glass_Tile': load_image('glass_tile.png'),
+            'Plant_Tile': replace_colors(load_image('plant_tile.png'), color_table),
+            'Portal_Tile_': Animation([replace_colors(img, color_table) for img in load_images('portal_tiles/active')], img_dur=30),
+            'Portal_Tile': replace_colors(load_image('portal_tiles/off/0.png'), color_table),
+            'Gem': gem_asset,
+            'Temp_Tile': replace_colors(load_image('elevators/0.png'), color_table)
+        }
         
     def create_maze(self, width, height):
         if width % 2 == 0:
@@ -103,23 +104,23 @@ class Maze:
 
 
     
-    def print_maze(self, spacing=""):
-        def symbol(i):
-            if i >= 10:
-                return ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
-                 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
-                 'U', 'V', 'W', 'X', 'Y', 'Z'][int((i - 10) % 26)]
-            return str(i)
+    # def print_maze(self, spacing=""):
+    #     def symbol(i):
+    #         if i >= 10:
+    #             return ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
+    #              'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
+    #              'U', 'V', 'W', 'X', 'Y', 'Z'][int((i - 10) % 26)]
+    #         return str(i)
             
-        for x in range(self.cols):
-            col = ""
-            for y in range(self.rows):
-                if self.maze[y][x] is not None:
-                    col += symbol(int(self.maze[y][x].z))
-                else:
-                    col += "#"
-            print(col)
-        print(spacing, end="")
+    #     for x in range(self.cols):
+    #         col = ""
+    #         for y in range(self.rows):
+    #             if self.maze[y][x] is not None:
+    #                 col += symbol(int(self.maze[y][x].z))
+    #             else:
+    #                 col += "#"
+    #         print(col)
+    #     print(spacing, end="")
 
         
     def add_room(self, x, y, w, h):
@@ -268,9 +269,9 @@ class Maze:
             for cell_i, cell in enumerate(row):
                 if cell is not None:
                     if cell.type == 'Elevator':
-                        top = check(cell.get_neighbor(-1,0), cell.get_neighbor(0,-1),min)
-                        bottom = check(cell.get_neighbor(1,0), cell.get_neighbor(0,1),max)
-                        if top is not None and bottom is not None:
+                        top = check(cell.get_accessible_neighbor(-1,0), cell.get_accessible_neighbor(0,-1),min)
+                        bottom = check(cell.get_accessible_neighbor(1,0), cell.get_accessible_neighbor(0,1),max)
+                        if top is not None and bottom is not None and (top.all_z[-1] - bottom.z1 >= 2):
                             cell.pos = top.all_z[-1]
                             cell.other_z = bottom.z1
                         elif bottom is None:    
@@ -576,7 +577,6 @@ class Maze:
         CLUSTER_ATTEMPTS = 100
         CLUSTER_SIZE = (2, 5)
 
-
         noise_map = [[pnoise2(x / SCALE, y / SCALE, octaves=3)
                       for x in range(GRID_WIDTH)] for y in range(GRID_HEIGHT)]
 
@@ -638,20 +638,20 @@ class Maze:
         return []
 
 
-    def print_types(self, spacing=""):
+    # def print_types(self, spacing=""):
 
-        for x in range(self.cols):
-            col = ""
-            for y in range(self.rows):
-                if self.maze[y][x] is not None:
-                    if self.maze[y][x].type == 'Enemy_Tile':
-                        col += 'e'
-                    else:
-                        col += self.maze[y][x].type[0]
-                else:
-                    col += "#"
-            print(col)
-        print(spacing, end="")
+    #     for x in range(self.cols):
+    #         col = ""
+    #         for y in range(self.rows):
+    #             if self.maze[y][x] is not None:
+    #                 if self.maze[y][x].type == 'Enemy_Tile':
+    #                     col += 'e'
+    #                 else:
+    #                     col += self.maze[y][x].type[0]
+    #             else:
+    #                 col += "#"
+    #         print(col)
+    #     print(spacing, end="")
 
 
     def connectivity(self):
