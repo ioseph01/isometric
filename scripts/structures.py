@@ -17,7 +17,7 @@ class Tile:
         self.maze = maze
         self.pos = z
         self.x, self.y = x, y
-        sprite_variant = self.maze.sprite_variant if self.maze.sprite_variant is not None else stable_randint(x, y, z, self.maze.game.level)
+        sprite_variant = stable_randint(x, y, z, self.maze.game.level)
         sprite = self.type
         self.sprite = self.maze.assets[sprite][sprite_variant]
         self.player_tile = player_tile
