@@ -1,38 +1,74 @@
 import pygame
 import random
-from structures import Elevator, Tile
-from utils import *
+from noise import pnoise2
+from scripts.animation import Animation
+from scripts.structures import Elevator, Enemy_Tile, Glass_Tile, Player_Tile, Tile, structures_factory
+from scripts.utils import *
 
 NEIGHBORS = [(-1,0), (0,-1), (1,0), (0,1)]
 
 class Maze:
-    def __init__(self, game, width, height, tile_asset, elevator_asset, stair_prob=0, room_attempts=0, sparsity=[0,0], elevator_prob=0):
+    def __init__(self, game, width, height, gem_asset, color_table=None,
+                 sprite_variant=None, stair_prob=0, room_attempts=0, sparsity=[0,0], elevator_prob=0,
+                 friendlies_prob=0, enemies_prob=0, enemies_cooldown=None, glass_prob=0, wall_height=1):
         self.game = game
         self.maze = self.create_maze(width, height)
-        self.width = width
+        self.width = width 
         self.height = height
         self.TILE_WIDTH, self.TILE_HEIGHT = 20, 10
-        self.WALL_HEIGHT = 4
-        self.WALL_SPACING = 4
-        self.assets = {
-            'Tile': self.game.assets[tile_asset],
-            'Elevator': self.game.assets[elevator_asset],
-        }
-        print(self.assets['Tile'])
-        print(self.assets['Elevator'])
+        self.WALL_HEIGHT = wall_height
+        self.WALL_SPACING = 8
         
+        self.sprite_variant = sprite_variant
+        self.init_settings = {
+            'width': width, 'height': height, 'sprite_variant':sprite_variant, 'stair_probability': stair_prob, 'room attempts': room_attempts,
+            'sparsity setting': sparsity, 'elevator_prob': elevator_prob, 'friendlies_prob': friendlies_prob, 'enemies_prob': enemies_prob,
+            'glass_prob': glass_prob
+            }
+        self.assets = {
+            'Tile': [replace_colors(img, color_table) for img in load_images('tiles')],
+            'Elevator': [replace_colors(img, color_table) for img in load_images('elevators')],
+            'Player_Tile': [replace_colors(img, color_table) for img in load_images('player_tiles')],
+            'Enemy_Tile': [replace_colors(img, color_table) for img in load_images('enemy_tiles')],
+            'Glass_Tile': load_image('glass_tile.png'),
+            'Plant_Tile': replace_colors(load_image('plant_tile.png'), color_table),
+            'Portal_Tile_': Animation([replace_colors(img, color_table) for img in load_images('portal_tiles/active')], img_dur=30),
+            'Portal_Tile': replace_colors(load_image('portal_tiles/off/0.png'), color_table),
+            'Gem': gem_asset,
+            'Temp_Tile': replace_colors(load_image('elevators/0.png'), color_table)
+        }
+        self.render_counter = 0
+      
+
+        self.enemy_tile_cooldown = enemies_cooldown
         self.maze = self.generate_rooms(room_attempts)
-        self.maze = self.combine(self.carve(self.maze, stair_prob=stair_prob), self.carve(self.create_maze(width, height)), sparsity=sparsity)
+        self.combine(self.carve(self.maze, stair_prob=stair_prob), self.carve(self.create_maze(self.width, self.height)), sparsity=sparsity, friendlies_prob=friendlies_prob, enemies_prob=enemies_prob, glass_prob=glass_prob)
         self.maze = self.fix_maze(self.maze)
         self.add_elevators(elevator_prob)
+        
         for i in range(10):
+            self.init_settings['elevator_prob'] = max(i * 10 + elevator_prob, elevator_prob, 15)
+            # self.maze = self.fix_maze(self.maze)
+            
             print("Attempt", i)
-            if self.trace([1,1], [width - 2, height - 2]) is None:
+            if not self.connectivity() or self.trace((1,1), (self.width - 2, self.height - 2)) == []:
                 self.add_elevators(i * 10 + elevator_prob)
+                self.maze = self.fix_maze(self.maze)
             else:
+                self.maze = self.fix_maze(self.maze)
                 break
         else:
             raise RuntimeError
+
+    def enemy_cooldown(self, x=0, y=0):
+        if self.enemy_tile_cooldown == 0:
+            result = pnoise2(x / self.w, y / self.h, octaves=1, base=self.game.level)
+            return int(round(3 + ((result + 1) / 2) * 57)) * 10
+        return self.enemy_tile_cooldown
+
+    @property
+    def settings(self):
+        return self.init_settings
 
     @property
     def cols(self):
@@ -49,7 +85,6 @@ class Maze:
     @property
     def h(self):
         return self.height
-
 
     def in_range(self, coord):
         return 0 <= coord[0] < self.w and 0 <= coord[1] < self.h
@@ -80,7 +115,7 @@ class Maze:
             col = ""
             for y in range(self.rows):
                 if self.maze[y][x] is not None:
-                    col += symbol(self.maze[y][x].z)
+                    col += symbol(int(self.maze[y][x].z))
                 else:
                     col += "#"
             print(col)
@@ -102,7 +137,6 @@ class Maze:
             return self.maze
         for attempt in range(attempts):
             x,y,w,h = random.randint(0,((self.cols - 3) // 2)) * 2 + 1, random.randint(0,(self.rows - 3) // 2) * 2 + 1, random.randint(2, 6), random.randint(2,6)
-            print(x,y,w,h)
             if x + w < len(self.maze[0]) - 2 and y + h < len(self.maze) - 2:
                 room = pygame.Rect(x,y,w,h)
                 for r in rooms:
@@ -152,7 +186,7 @@ class Maze:
                     continue
                 seen.add((cx, cy))
         
-                if self.in_range((cx, cy)) and layout[cy][cx] == ".":
+                if layout[cy][cx] == ".":
                     layout[cy][cx] = Tile(self, z_val, cx, cy)
                     for dx, dy in [(0,1), (1,0), (0,-1), (-1,0)]:
                         nx, ny = cx + dx, cy + dy
@@ -220,9 +254,30 @@ class Maze:
 
 
     def fix_maze(self, maze):
+        def check(a,b, comparator=max):
+            coords = []
+            if a is not None:
+                coords.append(a)
+            if b is not None:
+                coords.append(b)
+            if len(coords) <= 0:
+                return None
+            return comparator(coords)
+            
         for row_i, row in enumerate(maze):
             for cell_i, cell in enumerate(row):
                 if cell is not None:
+                    if cell.type == 'Elevator':
+                        top = check(cell.get_neighbor(-1,0), cell.get_neighbor(0,-1),min)
+                        bottom = check(cell.get_neighbor(1,0), cell.get_neighbor(0,1),max)
+                        if top is not None and bottom is not None:
+                            cell.pos = top.all_z[-1]
+                            cell.other_z = bottom.z1
+                        elif bottom is None:    
+                            self.maze[row_i][cell_i] = Tile(self, cell.z1, cell_i, row_i)
+                        else:
+                            self.maze[row_i][cell_i] = Tile(self, cell.z2, cell_i, row_i)
+                               
                     for dx in range(-1,100):
                     
                         dy = dx + 1 if dx > -1 else 1
@@ -232,19 +287,29 @@ class Maze:
                         if (a:= in_range([cell_i + dx, row_i + dy], self)):
                             to_check = maze[row_i + dy][cell_i + dx]
                             if to_check is not None:
-                                if to_check.z - cell.z > dz - 1:
-                                    maze[row_i + dy][cell_i + dx] = Tile(self, max(0, cell.z + dz - offset - random.choice([1,2,2,2,2,2])), cell_i + dx, row_i + dy)
+                                if to_check.z - cell.z > dz - 1 and cell.type != 'Elevator':
+                                    # maze[row_i + dy][cell_i + dx] = Tile(self, max(0, cell.z + dz - offset - random.choice([1,2,2,2,2,2])), cell_i + dx, row_i + dy)
+                                    maze[row_i + dy][cell_i + dx] = structures_factory(self, cell.type, max(0, cell.z + dz - offset - random.choice([1,2,2,2,2,2])), cell_i + dx, row_i + dy)
                             
                         if (b:= in_range([cell_i + dy, row_i + dx], self)):
                             to_check = maze[row_i + dx][cell_i + dy]
                             if to_check is not None:
-                                if to_check.z - cell.z > dz - 1:
-                                    maze[row_i + dx][cell_i + dy] = Tile(self, max(0, cell.z + dz - offset - random.choice([1,2,2,2,2,2])), cell_i + dy, row_i + dx)
+                                if to_check.z - cell.z > dz - 1  and cell.type != 'Elevator':
+                                    maze[row_i + dx][cell_i + dy] = structures_factory(self, cell.type, max(0, cell.z + dz - offset - random.choice([1,2,2,2,2,2])), cell_i + dy, row_i + dx)
                         if not a and not b:
                             break
                         
-                                
-        return maze
+
+             
+        self.maze = maze
+        # if self.settings['friendlies_prob'] >= 50 or self.settings['enemies_prob'] >= 50:
+        if self.trace((1,1), (self.w - 2, self.h - 2)) != []:
+            for px, py, pz in self.trace((1,1), (self.w - 2, self.h - 2)) + self.trace((self.w - 2, self.h - 2), (1,1)):
+                cell = self.maze[py][px]
+                if cell.type in ('Enemy_Tile', 'Player_Tile'):
+                    self.maze[py][px] = random.choices([structures_factory(self, 'Tile', pz, px, py), structures_factory(self, 'Glass_Tile', pz, px, py)], weights=[80,5], k=1)[0]
+                        
+        return self.maze
 
     def add_elevators(self, probability=80):
         if probability <= 0:
@@ -252,9 +317,9 @@ class Maze:
         maze = self.maze
         def check(a,b, tile_type, comparator=max):
             coords = []
-            if cell_type(a, self, tile_type):
+            if get_cell_type(a, self) not in (None, 'Elevator'):
                 coords.append(maze[a[1]][a[0]])
-            if cell_type(b, self, tile_type):
+            if get_cell_type(b, self) not in (None, 'Elevator'):
                 coords.append(maze[b[1]][b[0]])
             if len(coords) <= 0:
                 return None
@@ -271,7 +336,7 @@ class Maze:
                             if cell_type((cell_i + dx, row_i + dy), self, 'Elevator'):
                                 break
                     else:
-                        if (maze[row_i][cell_i - 1] is not None or maze[row_i - 1][cell_i]):
+                        if (maze[row_i][cell_i - 1] is not None or maze[row_i - 1][cell_i]) is not None:
                             other = check([cell_i, row_i + 1], [cell_i + 1, row_i], 'Tile')
                             if other is None:
                                 other = check([cell_i + 2, row_i + 1], [cell_i + 1, row_i + 2], 'Tile')
@@ -279,40 +344,97 @@ class Maze:
                                     diag = maze[row_i + 1][cell_i + 1].z1 if cell_valid([cell_i + 1, row_i + 1], self) else 0
                                     if cell.z - other.z1 >= 2 and probability > random.randint(0,100) and diag + 1 <= other.z1:
                                         maze[row_i][cell_i] =  Elevator(self, cell.z, max(0, other.z - 1), cell_i, row_i)
-                                        print(cell_i,row_i, cell.z1)
                             elif cell.z - other.z >= 2 and probability > random.randint(0,100):
                                 maze[row_i][cell_i] =  Elevator(self, cell.z, other.z, cell_i, row_i)
 
     
 
-    def combine(self, layout, other, sparsity):
+    def combine(self, layout, other, sparsity, friendlies_prob=0, enemies_prob=0, glass_prob=0, preserve_current=False):
+        
+        def makeTile(z,x,y):
+            return Tile(self, z,x,y)
+        
+        def makePlayerTile(z,x,y):
+            return Player_Tile(self, z, x, y)
+
+        def makeEnemyTile(z,x,y):
+            return Enemy_Tile(self,z,x, y, self.enemy_cooldown(x,y))
+           
+        def makeGlassTile(z,x,y):
+            return Glass_Tile(self, z,x,y)
+        
+        
+        if sparsity == [0,0]:
+            return
+        
+        new_tiles = []
         for y in range(1, len(other) - 1):
             for x in range(1, len(layout[y]) - 1):
-                
-                if (layout[y][x] is None or None is other[y][x]) and random.randint(0,100) < sparsity[0]:
-                    for z in [layout[y][x], layout[y - 1][x], layout[y][x - 1]]:
-                        if z is not None:
-                            layout[y][x] = Tile(self,z.z, x, y)
-                            break
-
-                if  random.randint(0, 100 ) < sparsity[1] and x != 0 and x != len(layout[0]) - 1 and y != 0 and y != len(layout) - 1 and x % 2 != 1 and y % 2 != 1:
-                    for z in [layout[y][x - 1], layout[y - 1][x]]:
-                        if z is not None:
-                            layout[y][x] = Tile(self,z.z, x, y)
-                            break
+                if preserve_current and self.maze[y][x] is not None:
+                            continue
+                tile = makeTile
+                if (layout[y][x] is None or None is other[y][x]):
+                    if random.randint(0,100) < sparsity[0]:
+                        tile = makeTile
+                        if random.randint(0,100) < glass_prob:
+                            tile = makeGlassTile
+                        elif random.randint(0,100) < friendlies_prob and (x,y) :
+                            tile = makePlayerTile
+                        elif random.randint(0,100) < enemies_prob and (x,y):
+                            tile = makeEnemyTile
+                        for z in [layout[y][x], layout[y - 1][x], layout[y][x - 1]]:
+                            if z is not None:
+                                layout[y][x] = tile(z.z1, x, y)
+                                break
+                        continue
+                            
+                    if x != 0 and x != len(layout[0]) - 1 and y != 0 and y != len(layout) - 1 and x % 2 != 1 and y % 2 != 1:
+                        
+                        if random.randint(0,100) < sparsity[1]:
+                            tile = makeTile
+                            if random.randint(0,100) < glass_prob:
+                                tile = makeGlassTile
+                            elif random.randint(0,100) < friendlies_prob and (x,y):
+                                tile = makePlayerTile
+                            elif random.randint(0,100) < enemies_prob and (x,y):
+                                tile = makeEnemyTile
+                            
+                            for z in [layout[y][x - 1], layout[y - 1][x]]:
+                                if z is not None:
+                                    layout[y][x] = tile(z.z1, x, y)
+                                    break
     
-        return layout
+        self.maze = layout
+        return new_tiles
 
     
 
-    def draw_map(self, screen, offset=(0,0)):
+    def draw_map(self, screen, offset=(0,0), entities={}, border_layer=None, paused=False):
         ''' Maze render function '''
+        counter = 0
         for y in range(self.h):
             for x in range(self.w):
+                if counter >= self.render_counter:
+                    self.render_counter += 1
+                    return
                 tile = self.maze[y][x]
                 if tile is not None:
-                    tile.update()
-                    tile.render(screen, self.WALL_HEIGHT, offset, self.WALL_SPACING)
+                    
+                    if not paused and self.w*self.h <= self.render_counter:
+                        tile.update()
+                    wall_height = self.WALL_HEIGHT * 2 if self.WALL_HEIGHT is not None else (1+(x*y*(tile.z1 + 1))%4) * 4
+                    tile.render(screen, wall_height, offset, self.WALL_SPACING)
+                    if (x,y) in entities:
+                        for e in entities[(x,y)]:
+                            e.render(screen, offset)
+                            
+                    for nx, ny in tile.back_neighbors:
+                        if (nx,ny) in entities:
+                            if self.maze[ny][nx].z <= tile.z:
+                                for entity in entities[(nx,ny)]:
+                                    entity.render(screen, offset)
+                counter += 1
+                    
 
 
     def border_check(self, player, direction):
@@ -320,7 +442,7 @@ class Maze:
             if self.maze[player[1]][player[0]].type == 'Tile':
                 return player, [0,0]
         elif self.maze[player[1]][player[0]].type == 'Elevator':
-            if self.maze[player[1]][player[0]].time_stopped >= 50:
+            if self.maze[player[1]][player[0]].time_stopped > 50:
                 return player,[0,0]
             
         sign_ = sign(direction[0]) if sign(direction[0]) != 0 else sign(direction[1]) 
@@ -353,12 +475,12 @@ class Maze:
         
 
 
-    def trace(self, player, target):
+    def trace(self, player, target, limit=1000):
         
         x,y = player
         target_x, target_y = target
     
-        if self.maze[y][x].type == 'Tile':
+        if self.maze[y][x].type != 'Elevator':
             visited = {(x, y, self.maze[y][x].z)}
             paths = [[(x, y, self.maze[y][x].z)]]
         else:
@@ -368,8 +490,9 @@ class Maze:
             paths += [[(x, y, self.maze[y][x].z2)]]
         
         if player == target:
-            return [(player)]
+            return [(*player, self.maze[target[1]][target[0]].z1)]
         
+        WALKABLES = ('Enemy_Tile', 'Tile', 'Elevator', 'Glass_Tile', 'Plant_Tile', 'Temp_Tile')
         while len(paths) > 0 :
             
             current = paths.pop(-1)
@@ -379,6 +502,8 @@ class Maze:
                 return current
             
             visited.add((x, y, z))
+            if len(current) > limit:
+                continue
             
             toAdd = {}
             
@@ -386,12 +511,14 @@ class Maze:
             for dx,dy,dz in dirs:
                 if in_range((x + dx, y + dy), self):
                     cell = self.maze[y + dy][x + dx]
-
+                    
                     if cell != None:
-                        if cell.type == 'Tile' and self.maze[y][x].type == 'Tile':
+                        if cell.type not in WALKABLES:
+                            continue
+                        if cell.type != 'Elevator' and self.maze[y][x].type != 'Elevator':
                             if cell.z - self.maze[y][x].z not in dz or (x + dx, y + dy, cell.z) in visited:
                                 continue
-                        elif cell.type == 'Tile' and self.maze[y][x].type == 'Elevator':
+                        elif cell.type != 'Elevator' and self.maze[y][x].type == 'Elevator':
                             closer_z = self.maze[y][x].z1 if abs(self.maze[y][x].z1 - cell.z) < abs(self.maze[y][x].z2 - cell.z) else self.maze[y][x].z2
                             if (cell.z - z not in dz) or (x + dx, y + dy, closer_z) in visited:
                                 continue
@@ -406,7 +533,7 @@ class Maze:
                         if cell.type == 'Elevator':
                             closer_z = cell.z1 if abs(self.maze[y][x].z - cell.z1) < abs(self.maze[y][x].z - cell.z2) else cell.z2
                             toAdd[k].append((x + dx, y + dy, closer_z))
-                        elif cell.type == 'Tile':
+                        elif cell.type != 'Elevator':
                             toAdd[k].append((x + dx, y + dy, cell.z))
                         
             if self.maze[y][x].type == 'Elevator':
@@ -425,10 +552,124 @@ class Maze:
                         toAdd[k].append((x,y,self.maze[y][x].z1))
                     
                     
-            for key in reversed(dict(sorted(toAdd.items()))):
-                for val in random.sample(toAdd[key], len(toAdd[key])):
-                    if val not in visited:
-                        paths.append(current + [val])
-     
+            all_positions = [
+                (dist + random.random(), pos)
+                for dist, vals in toAdd.items()
+                for pos in vals
+            ]
+
+            for _, pos in reversed(sorted(all_positions)):
+                if pos not in visited:
+                    visited.add(pos)
+                    paths.append(current + [pos])
+        return []
+
+    def generate_gems(self, gems:int, gemstones:int):
+        gem_locs = set()
+        gemstone_locs = set()
+        
+        GRID_WIDTH = 40
+        GRID_HEIGHT = 40
+
+        SCALE = 15.0
+        THRESHOLD = -.15
+        CLUSTER_ATTEMPTS = 100
+        CLUSTER_SIZE = (2, 5)
 
 
+        noise_map = [[pnoise2(x / SCALE, y / SCALE, octaves=3)
+                      for x in range(GRID_WIDTH)] for y in range(GRID_HEIGHT)]
+
+        for _ in range(CLUSTER_ATTEMPTS):
+            x = random.randint(0, GRID_WIDTH - 1)
+            y = random.randint(0, GRID_HEIGHT - 1)
+
+            if noise_map[y][x] > THRESHOLD:
+                num_plants = random.randint(*CLUSTER_SIZE)
+                for _ in range(num_plants):
+                    dx = int(random.gauss(0, 2))
+                    dy = int(random.gauss(0, 2))
+                    nx, ny = x + dx, y + dy
+                    if (nx,ny) == (1,1) or (nx,ny) == (self.w - 2, self.h - 2):
+                        continue
+                    
+                    if cell_type((nx, ny), self):
+                        if 1 == len(self.maze[ny][nx].adjacent_cells) and len(gemstone_locs) < gemstones:
+                            gemstone_locs.add((nx,ny))
+                        elif len(gem_locs) < gems:   
+                            gem_locs.add((nx, ny))
+                        else:
+                            return gem_locs, gemstone_locs
+                        
+        return gem_locs, gemstone_locs
+
+
+    def set_tile_outline(self):
+        for i,row in enumerate(self.maze):
+            for j,tile in enumerate(row):
+                if tile is not None:
+                    if tile.type in ('Tile', 'Player_Tile', 'Enemy_Tile', 'Plant_Tile', 'Portal_Tile'):
+                        tile.init_outline()
+
+    
+
+    def get_spawnpoints(self, x, y, count):
+        if cell_type([x,y], self):
+            visited = set()
+            spawn_points = set()
+            toVisit = [(x,y)]
+            while toVisit and len(spawn_points) < count:
+                cx,cy = toVisit.pop(0)
+                if (cx, cy) in visited:
+                    continue
+                cell = self.maze[cy][cx]
+                visited.add((cx,cy))
+                for next_cell in cell.adjacent_cells:
+                    pos = (next_cell.x, next_cell.y)
+                    
+                    if pos not in spawn_points:
+                        if next_cell.type in ('Tile', 'Plant_Tile', 'Glass_Tile'):
+                            spawn_points.add((next_cell.x, next_cell.y))
+                            if len(spawn_points) >= count:
+                                return spawn_points
+                    if pos not in visited:
+                        toVisit.append(pos)
+            return spawn_points
+        return []
+
+
+    def print_types(self, spacing=""):
+
+        for x in range(self.cols):
+            col = ""
+            for y in range(self.rows):
+                if self.maze[y][x] is not None:
+                    if self.maze[y][x].type == 'Enemy_Tile':
+                        col += 'e'
+                    else:
+                        col += self.maze[y][x].type[0]
+                else:
+                    col += "#"
+            print(col)
+        print(spacing, end="")
+
+
+    def connectivity(self):
+        ALL = {(j.x, j.y) for row in self.maze for j in row if j is not None}
+        if not ALL:
+                return False
+        
+        visited = set()
+        toVisit = {(1,1)}
+        while toVisit:
+            x,y = toVisit.pop()
+            if (x, y) in visited:
+                continue
+            visited.add((x,y))
+            cell = self.maze[y][x]
+            for adjacent in cell.adjacent_cells:
+                if (adjacent.x, adjacent.y) not in visited:
+                    toVisit.add((adjacent.x, adjacent.y))
+                    
+        return ALL == visited
+        
