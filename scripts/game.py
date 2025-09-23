@@ -14,14 +14,13 @@ colors = list({(255, 201, 0), (255, 203, 205), (251, 255, 235), (231, 220, 185),
 
 
 class Game:
-    def __init__(self):
-        pygame.init()
-        
+    def __init__(self, controller):
+        self.controller = controller
         self.sprite = "tile"
         self.screen = pygame.display.set_mode((720, 540))
         self.display = pygame.Surface((240,180), pygame.SRCALPHA)
         # self.display = pygame.Surface((320,240), pygame.SRCALPHA)
-        self.clock = pygame.time.Clock()
+        # self.clock = pygame.time.Clock()
         pygame.display.set_caption("Isometric")
         
         self.render_offset = [0,0]
@@ -59,7 +58,6 @@ class Game:
         
         self.color_table={(255,0,0):(255,110,89), (0,0,255):(18,83,89)}
         self.level = 0
-        # self.maze = Maze(self, 21,21, 'tile', 'elevator', color_table=None, stair_prob=0, sparsity=(100,100), )
         self.maze = Maze(self, 21,21, self.assets['gem'], color_table={(255,0,0):(255,110,89), (0,0,255):(18,83,89)}, stair_prob=0, sparsity=(100,100), )
         self.entities = []
         self.gems = set()
@@ -67,9 +65,7 @@ class Game:
         self.gemstones = set()
         self.paused = False
         self.score = 0
-        self.score_text = Font('small_font.png')
-        self.score = 0
-        self.stage = False
+        self.stage = True
         self.lives = 5
         self.gem_count = 0
         self.skip = False
@@ -77,7 +73,6 @@ class Game:
         
         
     def start_level(self):
-        self.player = Player(self, [1,1], self.assets['player/idle'], render_offset=[0,-12], e_type='Player')
         self.player = Player(self, [1,1], self.assets['player/idle'], render_offset=[0,-12], e_type='Player')
         self.entities = []
         self.tick = [0, 60]
@@ -117,17 +112,14 @@ class Game:
         
         pygame.draw.rect(self.screen, self.color_table[(255,0,0)], (25,5,140,80))
         pygame.draw.rect(self.screen, BLACK, (30,10,130,70))
-        self.score_text.render(self.screen, str(self.score), (40,15))
-        self.score_text.render(self.screen, '@' * self.lives, (40,35))
-        self.score_text.render(self.screen, f'{min(self.player.gems, 100)}/{self.player.cooldown}', (40,55))
+        self.controller.font.render(self.screen, str(self.score), (40,15))
+        self.controller.font.render(self.screen, '@' * self.lives, (40,35))
+        self.controller.font.render(self.screen, f'{min(self.player.gems, 100)}/{self.player.cooldown}', (40,55))
         
         pygame.draw.rect(self.screen, self.color_table[(0,0,255)], (480,5,140,80))
         pygame.draw.rect(self.screen, BLACK, (485,10,130,70))
-        self.score_text.render(self.screen, f'Level {self.level}', (500,15))
-        self.score_text.render(self.screen, f'Stage {self.stage + 1}', (500,35))
-        
-        
-        
+        self.controller.font.render(self.screen, f'Level {self.level}', (500,15))
+        self.controller.font.render(self.screen, f'Stage {self.stage + 1}', (500,35))
         pygame.display.flip()
     
 
@@ -241,13 +233,20 @@ class Game:
             except RuntimeError:
                 pass
 
+
+    def quit(self):
+        stats_screen = self.controller.windows['Stats']
+        stats_screen.load_from_game(self)
+        self.controller.mode = 'Stats'
+
     def death(self):
         maze = self.maze.maze
         d1 = random.randint(5, 20 - (self.lives * 2) ) if self.level % 2 == 0 else 1
         d2 = random.randint(5, (self.lives - 8) ** 2) if self.level % 2 == 1 else 1
                             
         self.maze.combine(self.maze.maze, self.maze.carve(self.maze.create_maze(self.maze.width, self.maze.height)), [d1, d2], preserve_current=True)
-        self.maze.fix_maze(self.maze.maze)
+        for i in range(2):
+            self.maze.fix_maze(self.maze.maze)
         if not self.maze.connectivity():
             self.maze.maze = maze
         self.maze.add_elevators(90 - 15 * self.lives)
@@ -279,9 +278,7 @@ class Game:
             
             
 
-    def run(self):
-        running = True
-        while running:
+    def update(self, events, screen):
             if self.skip:
                 self.skip = False
                 self.stage = True
@@ -289,7 +286,7 @@ class Game:
                 self.gemstones = set()
                 self.player.gems = 0
                 self.reset(True)
-                continue
+                return
             entity_dict = {}
             
             if not self.paused and self.maze.w*self.maze.h == self.maze.render_counter:
@@ -344,7 +341,7 @@ class Game:
                                         self.death()
                                         continue
                                     else:
-                                        running = False
+                                        self.quit()
                         entity_dict.setdefault((entity.x, entity.y), []).append(entity)
                     else:
                         self.entities.remove(entity)
@@ -362,7 +359,7 @@ class Game:
                 else:
                     self.score += 500
                 self.reset()
-                continue
+                return
             
             padding = 45
             x,y = self.player.render_pos
@@ -376,9 +373,9 @@ class Game:
                 self.render_offset[1] -= (y - self.display.get_height() / 2) / 20
             if y < 0 + padding:
                 self.render_offset[1] -= (y - self.display.get_height() / 2) / 20
-            for event in pygame.event.get():
+            for event in events:
                 if event.type == pygame.QUIT:
-                    running = False
+                    self.quit()
         
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_1:
@@ -414,14 +411,6 @@ class Game:
                         x,y = self.display.get_size()
                         self.display = pygame.Surface((max(4, x - 4), max(y - 3, 3)), pygame.SRCALPHA)
                         print(self.display.get_size())
-                    if event.key == pygame.K_o:
-                        gems = self.maze.generate_gems(20, 1)
-                        for l in gems:
-                            self.maze.maze[l[1]][l[0]] = Plant_Tile(self.maze, self.maze.maze[l[1]][l[0]].z, l[0], l[1])
-                            self.gems.add(l)
-                        # for l in gemstones:
-                        #     self.gemstones.add(l)
-                        print("Number of gems :", len(self.gems), '\nNumber of gemstones :', len(self.gemstones))
                     if event.key == pygame.K_e:
                         self.maze.add_elevators(60)
                     if event.key == pygame.K_l:
@@ -479,17 +468,5 @@ class Game:
             
             
                     if event.key in [pygame.K_q,pygame.K_ESCAPE]:
-                        running = False
+                        self.quit()
     
-
-            self.clock.tick(60)
-
-        return {
-            'title': random.choice(('Unlucky','Too bad', 'Game Over', 'End of Run', 'RIP')),
-            'score': str(self.score),
-            'level': str(self.level),
-            
-            }
-        # pygame.quit()
-        
-
