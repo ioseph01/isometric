@@ -233,9 +233,10 @@ class Game:
         self.maze.combine(self.maze.maze, self.maze.carve(self.maze.create_maze(self.maze.width, self.maze.height)), [d1, d2], preserve_current=True)
         for i in range(2):
             self.maze.fix_maze(self.maze.maze)
+        self.maze.add_elevators(90 - 15 * self.lives)
+        
         if not self.maze.connectivity():
             self.maze.maze = maze
-        self.maze.add_elevators(90 - 15 * self.lives)
         for i, row in enumerate(self.maze.maze):
             for j, cell in enumerate(row):
                 if self.maze.maze[i][j] is not None:
