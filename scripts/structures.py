@@ -64,6 +64,11 @@ class Tile:
                             cells.add(cell)
         return cells
     
+    def rect(self, pos=None, offset=(0,0)):
+        x, y = pos if pos is not None else self.render_pos
+        ox, oy = offset
+        return pygame.Rect(x + ox, y + oy, 20,24)
+
     def get_accessible_neighbor(self, dx,dy):
         ''' Gets the neighboring cell in the direction of dx and dy to the tile.
             Assumes dx,dy is reduced
@@ -121,13 +126,18 @@ class Tile:
         return [iso_x, iso_y]
 
 
-    def render(self, screen, h, offset, wall_spacing):
+    def render(self, screen, h, offset, wall_spacing, rect):
         x,y = self.render_pos
+        
         for i in reversed(range(0,h)):
-            screen.blit(self.sprite, (x + offset[0], y + offset[1] + wall_spacing * i))
+            self_rect = self.rect((x, y + wall_spacing * i),offset)
+            if rect.colliderect(self_rect):
+                screen.blit(self.sprite, (x + offset[0], y + offset[1] + wall_spacing * i))
             
-        for px, py in self.tile_outline:
-            screen.fill((95,87,79), (px+offset[0],py+offset[1],1,1))
+        self_rect = self.rect((x,y),offset)
+        if rect.colliderect(self_rect):
+            for px, py in self.tile_outline:
+                screen.fill((95,87,79), (px+offset[0],py+offset[1],1,1))
             
     def update(self):
         pass
@@ -238,8 +248,8 @@ class Elevator(Tile):
         else:
             self.time_stopped -= 1 
 
-    def render(self, screen, h, offset, wall_spacing):
-        super().render(screen, 1, offset, wall_spacing)
+    def render(self, screen, h, offset, wall_spacing, rect):
+        super().render(screen, 1, offset, wall_spacing, rect)
         
        
 class Glass_Tile(Tile):
@@ -273,14 +283,15 @@ class Glass_Tile(Tile):
         if self.time > 0:
             self.time -= 1
             
-    def render(self, screen, h, offset, wall_spacing):
+    def render(self, screen, h, offset, wall_spacing, rect):
         if self.active:
             x,y = self.render_pos
-            screen.blit(self.sprite, (x + offset[0], y + offset[1]), special_flags=pygame.BLEND_ALPHA_SDL2)
-            color = (95,87,79)
+            if self.rect((x,y),offset).colliderect(rect):
+                screen.blit(self.sprite, (x + offset[0], y + offset[1]), special_flags=pygame.BLEND_ALPHA_SDL2)
+                color = (95,87,79)
             
-            for dx,dy in get_border_points():
-                screen.fill(color, (x+dx+offset[0], y+dy+offset[1],1,1))
+                for dx,dy in get_border_points():
+                    screen.fill(color, (x+dx+offset[0], y+dy+offset[1],1,1))
             # screen.blit(self.sprite_grid, (x + offset[0], y + offset[1]))
         
 
@@ -351,16 +362,17 @@ class Enemy_Tile(Tile):
                 self.time -= sign(self.time)
                 
             
-    def render(self, screen, h, offset, wall_spacing):
+    def render(self, screen, h, offset, wall_spacing, rect):
         if self.active:
             sprite = self.sprite[0]
         else:
             sprite = self.sprite[1]
 
         x,y = self.render_pos
-        screen.blit(sprite, (x + offset[0], y + offset[1]))
-        for px, py in self.tile_outline:
-            screen.fill((95,87,79), (px+offset[0],py+offset[1],1,1))
+        if self.rect((x,y), offset).colliderect(rect):
+            screen.blit(sprite, (x + offset[0], y + offset[1]))
+            for px, py in self.tile_outline:
+                screen.fill((95,87,79), (px+offset[0],py+offset[1],1,1))
 
         
 class Plant_Tile(Tile):
@@ -409,7 +421,7 @@ class Portal_Tile(Tile):
         else:
             self.active = False
             
-    def render(self, screen, h, offset, wall_spacing):
+    def render(self, screen, h, offset, wall_spacing, rect):
         sprite = self.sprite
         
         if self.active:
@@ -417,9 +429,11 @@ class Portal_Tile(Tile):
 
         x,y = self.render_pos
         for i in reversed(range(0,h // 2)):
+            self_rect = self.rect((x,wall_spacing * i + y), offset)
             screen.blit(sprite, (x + offset[0], y + offset[1] + wall_spacing * i))
-        for px, py in self.tile_outline:
-            screen.fill((95,87,79), (px+offset[0],py+offset[1],1,1))
+        if self.rect((x,y), offset).colliderect(rect):
+            for px, py in self.tile_outline:
+                screen.fill((95,87,79), (px+offset[0],py+offset[1],1,1))
             
 
 class Temp_Tile(Tile):
@@ -435,9 +449,10 @@ class Temp_Tile(Tile):
                 n.back_neighbors.append((self.x,self.y))
         
 
-    def render(self, screen, h, offset, wall_spacing):
+    def render(self, screen, h, offset, wall_spacing, rect):
         x,y = self.render_pos
-        screen.blit(self.sprite, (x + offset[0], y + offset[1]))
+        if self.rect((x,y), offset).colliderect(rect):
+            screen.blit(self.sprite, (x + offset[0], y + offset[1]))
         
     @property
     def type(self):

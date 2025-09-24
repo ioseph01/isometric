@@ -17,7 +17,8 @@ class Game:
         self.controller = controller
         self.sprite = "tile"
         self.display = pygame.Surface((240,180), pygame.SRCALPHA)
-                
+        self.scaled_display = pygame.Surface((720, 540), pygame.SRCALPHA)
+
         self.render_offset = [0,0]
         self.movement = [False, False, False, False]
         self.load_assets()
@@ -94,13 +95,12 @@ class Game:
         K = (player.x, player.y)
         entities.setdefault(K, []).append(player)
 
-        dz = 0
         self.display.fill((0,0,0))
-        self.maze.draw_map(self.display, offset=offset, entities=entities, paused=self.paused)
-
-        # pygame.transform.scale(self.display, screen.get_size(), screen)
-        scaled_display = pygame.transform.scale(self.display, screen.get_size())
-        screen.blit(scaled_display, (0, 0))
+        self.maze.draw_map(self.display, offset=offset, entities=entities, rect=self.controller.screen_rect, paused=self.paused)
+        pygame.transform.scale_by(self.display, 3.0, self.scaled_display)  # scale into reusable surface
+        screen.blit(self.scaled_display, (0, 0)) 
+        # self.scaled_display = pygame.transform.scale(self.display, screen.get_size())
+        # screen.blit(self.scaled_display, (0, 0))
         
         pygame.draw.rect(screen, self.color_table[(255,0,0)], (25,5,140,80))
         pygame.draw.rect(screen, BLACK, (30,10,130,70))
@@ -203,14 +203,16 @@ class Game:
                         else:
                             self.gemstones.add(Gemstone(self,(x,y), self.assets['gemstone'],hp=1))
                         
-                self.gems = self.gems - {tuple(g.pos) for g in self.gemstones}
-                for x,y in self.gems.copy():
-                    if self.maze.maze[y][x].type == 'Portal_Tile':
-                        self.gems.remove((x,y))
-                for stone in self.gemstones.copy():
-                    if stone.at.type == 'Portal_Tile':
-                        self.gemstones.remove(stone)
-                
+                collected = {tuple(g.pos) for g in self.gemstones}
+
+                self.gems = {
+                    (x, y) for (x, y) in self.gems
+                    if (x, y) not in collected and self.maze.maze[y][x].type != 'Portal_Tile'
+                }
+                self.gemstones = {
+                    gem for gem in self.gemstones
+                    if gem.at != 'Portal_Tile'
+                }
 
                 self.maze.set_tile_outline()
                 return
@@ -273,33 +275,39 @@ class Game:
                 self.player.update(self.tick[0], movement=self.movement)
                 
                 pos_dict = {tuple(v.pos):v for v in self.entities} | {w: None for w in self.gemstones}
-                for pos in self.traps.copy():
-                    if self.traps[pos].hp <= 0:
-                        self.traps.pop(pos)
-                    else:
+                self.traps = {
+                    pos: trap for pos, trap in self.traps.items()
+                    if trap.hp > 0
+                }
+                for pos in self.traps:
                         trap = self.traps[pos]
                         trap.update()
                         entity_dict.setdefault((trap.x, trap.y), []).append(trap)
                 
-                for gem in self.gemstones.copy():
+                alive_gemstones = set()
+
+                for gem in self.gemstones:
                     if gem.hp <= 0:
-                        self.gemstones.remove(gem)
                         self.score += 50
                     else:
                         gem.update()
-                        entity_dict.setdefault((gem.x,gem.y), []).append(gem)
+                        entity_dict.setdefault((gem.x, gem.y), []).append(gem)
+                        alive_gemstones.add(gem)
+
+                self.gemstones = alive_gemstones
                     
-                for gem in self.gems.copy():
+                to_remove = set()
+                for gem in self.gems:
                     if tuple(self.player.pos) == gem or gem in self.gemstones:
-                        self.gems.remove(gem)
+                        to_remove.add(gem)
                         self.player.gems = min(100, self.player.gems + 1)
                         self.score += 10
-                        
                     else:
                         entity_dict.setdefault(gem, []).append(Gem(self, gem, self.maze.assets['Gem'], e_type='Gem', render_offset=[0,0]))
-                    
-                for entity in self.entities.copy():
-                    if entity.hp > 0:
+
+                self.gems.difference_update(to_remove)
+                self.entities = [e for e in self.entities if e.hp > 0]
+                for entity in self.entities:
                         entity.update(pos_dict)
                         
                         if (entity.x, entity.y) in self.gems:
@@ -317,8 +325,6 @@ class Game:
                                     else:
                                         self.quit()
                         entity_dict.setdefault((entity.x, entity.y), []).append(entity)
-                    else:
-                        self.entities.remove(entity)
 
 
             if self.player.egg is not None:
