@@ -84,7 +84,7 @@ class Tile:
                             cells.add(cell)
                 elif abs(dx) >= 1 and abs(dy) >= 1:
                     for diff in self.z_check(cell):
-                        if abs(diff) in dz:
+                        if diff in dz:
                             cells.add(cell)
         return cells
 
