@@ -354,11 +354,15 @@ class Game:
                 self.render_offset[1] -= (y - self.display.get_height() / 2) / 20
             if y < 0 + padding:
                 self.render_offset[1] -= (y - self.display.get_height() / 2) / 20
+                
             for event in events:
                 if event.type == pygame.QUIT:
                     self.quit()
         
                 if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_f:
+                        self.maze.WALL_HEIGHT = max((self.maze.WALL_HEIGHT + 1) % 10, 1)
+                        # self.maze.WALL_SPACING = (self.maze.WALL_SPACING + 1) % 16
                     if event.key in (pygame.K_0, pygame.K_o, pygame.K_v):
                         if self.player.egg is not None:
                             self.player.destroy_egg()
