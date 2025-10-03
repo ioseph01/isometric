@@ -9,14 +9,13 @@ NEIGHBORS = [(-1,0), (0,-1), (1,0), (0,1)]
 
 class Maze:
     def __init__(self, game, width, height, gem_asset, color_table=None, stair_prob=0, room_attempts=0, sparsity=[0,0], elevator_prob=0,
-                 friendlies_prob=0, enemies_prob=0, enemies_cooldown=None, glass_prob=0, wall_height=1):
+                 friendlies_prob=0, enemies_prob=0, enemies_cooldown=None, glass_prob=0, wall_height=4):
         self.game = game
         self.maze = self.create_maze(width, height)
         self.width = width 
         self.height = height
         self.TILE_WIDTH, self.TILE_HEIGHT = 20, 10
-        self.WALL_HEIGHT = wall_height
-        self.WALL_SPACING = 12
+        self.wall_height = wall_height
         
         self.init_settings = {
             'width': width, 'height': height, 'stair_probability': stair_prob, 'room attempts': room_attempts,
@@ -25,7 +24,7 @@ class Maze:
             }
         self.load_assets(color_table, gem_asset)
         self.render_counter = 0
-      
+        self.render_mode = True
 
         self.enemy_tile_cooldown = enemies_cooldown
         self.maze = self.generate_rooms(room_attempts)
@@ -44,6 +43,7 @@ class Maze:
                 break
         else:
             raise RuntimeError
+        
 
     def enemy_cooldown(self, x=0, y=0):
         if self.enemy_tile_cooldown == 0:
@@ -74,18 +74,20 @@ class Maze:
     def in_range(self, coord):
         return 0 <= coord[0] < self.w and 0 <= coord[1] < self.h
 
-
+    @property
     def dim(self):
         return (self.width, self.height)
     
     def load_assets(self, color_table, gem_asset):
         self.assets = {
             'Tile': [replace_colors(img, color_table) for img in load_images('tiles')],
+            'Tile_Cover': load_image('tile_cover.png'),
             'Elevator': [replace_colors(img, color_table) for img in load_images('elevators')],
             'Player_Tile': [replace_colors(img, color_table) for img in load_images('player_tiles')],
             'Enemy_Tile': [replace_colors(img, color_table) for img in load_images('enemy_tiles')],
             'Glass_Tile': load_image('glass_tile.png'),
             'Plant_Tile': replace_colors(load_image('plant_tile.png'), color_table),
+            'Plant_Cover': replace_colors(load_image('plant_cover.png'), color_table),
             'Portal_Tile_': Animation([replace_colors(img, color_table) for img in load_images('portal_tiles/active')], img_dur=30),
             'Portal_Tile': replace_colors(load_image('portal_tiles/off/0.png'), color_table),
             'Gem': gem_asset,
@@ -390,6 +392,24 @@ class Maze:
 
     def draw_map(self, screen, offset=(0,0), entities={}, border_layer=None, rect=None, paused=False):
         ''' Maze render function '''
+        if self.render_counter >= self.rows * self.cols and self.render_mode:
+            if not paused:
+                for y in range(self.h):
+                    for x in range(self.w):
+                        cell = self.maze[y][x]
+                        if cell is not None:
+                            cell.update()
+            screen.blit(self.static_surface,(offset[0] + self.offset[0], offset[1] + self.offset[1]))
+            for x,y in self.animated_tiles:
+                self.maze[y][x].render(screen,rect,offset)
+            for x,y in self.elevator_tiles:
+                self.maze[y][x].render(screen,rect,offset)
+            for x,y in self.glass_tiles:
+                self.maze[y][x].render(screen,rect,offset)
+            for k in entities:
+                for e in entities[k]:
+                    e.render(screen,offset, rect)
+            return
         counter = 0
         for y in range(self.h):
             for x in range(self.w):
@@ -401,8 +421,7 @@ class Maze:
                     
                     if not paused and self.w*self.h <= self.render_counter:
                         tile.update()
-                    wall_height = max(2, (self.WALL_HEIGHT * 2) % 10) if self.WALL_HEIGHT is not None else (1+(x*y*(tile.z1 + 1))%5) * 2
-                    tile.render(screen, wall_height, offset, self.WALL_SPACING, rect)
+                    tile.render(screen, rect, offset)
                     if (x,y) in entities:
                         for e in entities[(x,y)]:
                             e.render(screen, offset, rect)
@@ -583,11 +602,62 @@ class Maze:
 
 
     def set_tile_outline(self):
+        self.render_positions = {
+            tuple(cell.render_pos): cell
+            for y, col in enumerate(self.maze)
+            for x, cell in enumerate(col)
+            if cell is not None
+        }
+        self.render_positions = {}
+        self.animated_tiles = set()
+        self.elevator_tiles = set()
+        self.glass_tiles = set()
+        
         for i,row in enumerate(self.maze):
             for j,tile in enumerate(row):
                 if tile is not None:
                     if tile.type in ('Tile', 'Player_Tile', 'Enemy_Tile', 'Plant_Tile', 'Portal_Tile'):
                         tile.init_outline()
+                        
+        x0, x1 = 20000000, 0
+        y0, y1 = 20000000, 0
+        for col in self.maze:
+            for cell in col:
+                if cell is not None:
+                    x,y = cell.render_pos
+                    x0 = min(x0, x)
+                    y0 = min(y0, y)
+                    x1 = max(x1, x)
+                    y1 = max(y1, y)
+        x1 *= 2
+        y1 *= 2
+        self.offset = (x0, y0)
+        self.static_surface = pygame.Surface((x1-x0, y1-y0), pygame.SRCALPHA)
+        rect = pygame.Rect(0,0,1000000,10000000)
+        for col in self.maze:
+            for cell in col:
+                if cell is not None:
+                    x,y = cell.render_pos
+                    self.render_positions[(x,y)] = cell
+                    if cell.type not in ("Elevator", "Glass_Tile"):
+                        
+                            cell.render(self.static_surface,rect,[-self.offset[0],-self.offset[1]])
+                            
+                    if cell.type not in ('Player_Tile', 'Tile', 'Plant_Tile', 'Temp_Tile'):
+                        if cell.type == 'Elevator':
+                            self.elevator_tiles.add((cell.x,cell.y))
+                        else:
+                            if cell.type != 'Glass_Tile':
+                                self.animated_tiles.add((cell.x,cell.y))
+                                Tile(self,cell.z1,cell.x,cell.y).render(self.static_surface, rect, [-self.offset[0], -self.offset[1]])
+                            else:
+                                self.glass_tiles.add((cell.x,cell.y))
+                                cell.time = 0
+
+        self.glass_tiles = sorted(list(self.glass_tiles))
+        self.animated_tiles = sorted(list(self.animated_tiles))
+        self.elevator_tiles = sorted(list(self.elevator_tiles))
+        
 
     
 
@@ -622,16 +692,40 @@ class Maze:
                 return False
         
         visited = set()
-        toVisit = {(1,1)}
+        start = next(iter(ALL))  
+        toVisit = {start}
         while toVisit:
             x,y = toVisit.pop()
             if (x, y) in visited:
                 continue
             visited.add((x,y))
             cell = self.maze[y][x]
-            for adjacent in cell.accessible_adjacent_cells():
+            for dx,dy in NEIGHBORS:
+                adjacent = cell.get_accessible_neighbor(dx,dy)
+                if adjacent is None:
+                    continue
                 if (adjacent.x, adjacent.y) not in visited:
                     toVisit.add((adjacent.x, adjacent.y))
                     
         return ALL == visited
+        
+
+    def print_maze(self, spacing=""):
+        def symbol(i):
+            if i >= 10:
+                return ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
+                    'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
+                    'U', 'V', 'W', 'X', 'Y', 'Z'][int((i - 10) % 26)]
+            return str(i)
+            
+        for x in range(self.cols):
+            col = ""
+            for y in range(self.rows):
+                if self.maze[y][x] is not None:
+                    col += symbol(int(self.maze[y][x].z))
+                else:
+                    col += "#"
+            print(col)
+        print(spacing, end="")
+
         
