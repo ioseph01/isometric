@@ -47,6 +47,10 @@ class Game:
         self.gem_count = 0
         self.skip = False
         self.start_level()
+
+    @property 
+    def at(self):
+        return self.player.at
         
     def load_assets(self):
         
@@ -79,14 +83,24 @@ class Game:
     def add_enemies(self, count):
         
         self.entities = []
+        
+        base_weights = [0.4, 0.1, 0.2, 0.2, 0.2, 0.2]
+        chaos = int(self.level / 5)
+
+        weights = [
+            max(0.01, w + random.uniform(-0.05, 0.05) * chaos)
+            for w in base_weights
+        ]
+
+        total = sum(weights)
+        weights = [w / total for w in weights]
         for x,y in self.maze.get_spawnpoints(1,1,count):
-            x,y = 1,1
             factory = [Enemy(self, (x,y), self.assets['entity'], render_offset=[0,-8], e_type='Enemy'),Wisp(self, (x,y), self.assets['gem'], render_offset=[0,-15], e_type='Enemy'),
-                       Plant(self, (x,y), None, render_offset=[0,-12], e_type='Enemy'),Converter(self, (x,y), [replace_colors(img, self.color_table) for img in self.assets['Converter']], render_offset=[0,-2], e_type='Enemy'),
-                      Constructor(self, (x,y), replace_colors(self.assets['Constructor'], self.color_table), render_offset=[0,-8], e_type='Enemy'),
-                      Trapper(self, (x,y), self.assets['Trapper'], render_offset=[0,-4], e_type='Enemy')
-                       ]
-            result = random.choices(factory,weights=[0.4,0.1,0.2,0.2,0.2,0.2],k=1)[0]
+                Plant(self, (x,y), None, render_offset=[0,-12], e_type='Enemy'),Converter(self, (x,y), [replace_colors(img, self.color_table) for img in self.assets['Converter']], render_offset=[0,-2], e_type='Enemy'),
+                Constructor(self, (x,y), replace_colors(self.assets['Constructor'], self.color_table), render_offset=[0,-8], e_type='Enemy'),
+                Trapper(self, (x,y), self.assets['Trapper'], render_offset=[0,-4], e_type='Enemy')
+                ]
+            result = random.choices(factory,weights=weights,k=1)[0]
             self.entities.append(result)
             
 
@@ -132,7 +146,7 @@ class Game:
                 if self.level % 10 == 0 and self.level > 0:
                     self.player.cooldown = min(self.player.cooldown + 1, 100)
                 if self.level % 5 == 0 and self.level > 0:
-                    self.lives = min(self.lives + 1, 5)
+                    self.lives = min(self.lives + 1, 8)
                 changes = [
                     (5, 0),   
                     (0, 5),   
@@ -213,12 +227,11 @@ class Game:
                     gem for gem in self.gemstones
                     if gem.at != 'Portal_Tile'
                 }
-
                 self.maze.set_tile_outline()
                 return
             except RuntimeError:
                 pass
-
+        
 
     def quit(self):
         stats_screen = self.controller.windows['Stats']
@@ -228,7 +241,7 @@ class Game:
     def death(self):
         maze = self.maze.maze
         d1 = random.randint(5, 20 - (self.lives * 2) ) if self.level % 2 == 0 else 1
-        d2 = random.randint(5, (self.lives - 8) ** 2) if self.level % 2 == 1 else 1
+        d2 = random.randint(5, max(5, (self.lives - 8) ** 2)) if self.level % 2 == 1 else 1
                             
         self.maze.combine(self.maze.maze, self.maze.carve(self.maze.create_maze(self.maze.width, self.maze.height)), [d1, d2], preserve_current=True)
         for i in range(2):
@@ -237,13 +250,13 @@ class Game:
         
         if not self.maze.connectivity():
             self.maze.maze = maze
-        
-        for i, row in enumerate(self.maze.maze):
-            for j, cell in enumerate(row):
-                if self.maze.maze[i][j] is not None:
-                    self.maze.maze[i][j].tile_outline = set()
+        else:
+            for i, row in enumerate(self.maze.maze):
+                for j, cell in enumerate(row):
+                    if self.maze.maze[i][j] is not None:
+                        self.maze.maze[i][j].tile_outline = set()
 
-        self.maze.set_tile_outline()
+            self.maze.set_tile_outline()
         egg = self.player.egg
         self.lives -= 1
         self.player.reset()
@@ -290,7 +303,7 @@ class Game:
 
                 for gem in self.gemstones:
                     if gem.hp <= 0:
-                        self.score += 50
+                        self.score += 100
                     else:
                         gem.update()
                         entity_dict.setdefault((gem.x, gem.y), []).append(gem)
@@ -333,7 +346,8 @@ class Game:
                 ex,ey = self.player.egg
                 entity_dict.setdefault((ex, ey), []).append(Entity(self,(ex,ey),self.assets['egg']))
 
-            self.render(screen, self.maze, self.player, [int(self.render_offset[0]), int(self.render_offset[1])], entities=entity_dict)
+            if not self.paused:
+                self.render(screen, self.maze, self.player, [int(self.render_offset[0]), int(self.render_offset[1])], entities=entity_dict)
             
             if self.gems == set():
                 if self.stage:
@@ -355,7 +369,6 @@ class Game:
                 self.render_offset[1] -= (y - self.display.get_height() / 2) / 20
             if y < 0 + padding:
                 self.render_offset[1] -= (y - self.display.get_height() / 2) / 20
-                
             for event in events:
                 if event.type == pygame.QUIT:
                     self.quit()
@@ -366,13 +379,6 @@ class Game:
                             self.player.destroy_egg()
                     if event.key in (pygame.K_9, pygame.K_i, pygame.K_c):
                             self.player.create_egg()
-                    if event.key == pygame.K_h:
-                        self.lives += 1
-                        self.death()
-                    if event.key == pygame.K_g:
-                        self.gems = set()
-                    if event.key == pygame.K_f:
-                        self.entities = []
                     if event.key == pygame.K_p:
                         self.paused = not self.paused
                     if not self.paused:
@@ -400,6 +406,6 @@ class Game:
                         self.quit()
     
 
-
+                            
+                    
         
-
