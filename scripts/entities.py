@@ -49,9 +49,18 @@ class Entity:
         self.active = True
         self.gems = 0
 
+    def rect(self,pos=None, offset=(0,0)):
+        x,y = pos if pos is not None else self.render_pos
+        w,h = self.img.get_size()
+        return pygame.Rect(x + offset[0] + self.movement_offset[0] + self.render_offset[0],y + offset[1] + self.movement_offset[1] + self.render_offset[1],w,h)
+
     @property
     def img(self):
         return self.sprite
+
+    @property
+    def mask(self):
+        return pygame.mask.from_surface(pygame.transform.flip(self.img, self.flip, False))
 
     @property
     def at(self):
@@ -72,9 +81,38 @@ class Entity:
         iso_y -= self.at.z * (self.game.maze.TILE_HEIGHT // 2)  
         return [iso_x, iso_y]
     
-    def render(self, screen, offset):
+
+    def cutout(self, img):
+        
         x,y = self.render_pos
-        screen.blit(pygame.transform.flip(self.sprite, self.flip, False), (x + offset[0] + self.render_offset[0] + self.movement_offset[0], int(y) + offset[1] + self.render_offset[1] + self.movement_offset[1]))
+        x = round(x) + self.render_offset[0] + self.movement_offset[0]
+        y = round(y) + self.render_offset[1] + self.movement_offset[1]
+        if self.game.maze.render_mode:
+            for dy in range(0,2):
+                for dx in range(0,2):
+                    if dx == 0 and dy == 0:
+                        continue
+                    if not self.game.maze.in_range((self.x + dx, self.y + dy)):
+                        continue
+                    neighbor = self.game.maze.maze[dy + self.y][dx + self.x]
+                    if neighbor is not None:
+                        if neighbor.type != "Glass_Tile" and (self.at.z < neighbor.z) or self.type == 'Elevator':
+                            ox, oy = neighbor.render_pos
+                            diff = (ox - x, oy - y)
+                            overlap = self.mask.overlap_mask(neighbor.mask, diff)
+                            result = self.mask.copy()
+                            result.erase(overlap, (0, 0))
+                            cutout = result.to_surface(setcolor=(255, 255, 255, 255),
+                                                        unsetcolor=(0, 0, 0, 0))
+                            cutout.set_colorkey((0, 0, 0))
+                            img.blit(cutout, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+
+        return img
+
+    def render(self, screen, offset, rect):
+        x,y = self.render_pos
+        if self.rect((x,y),offset).colliderect(rect):
+            screen.blit(self.cutout(pygame.transform.flip(self.sprite, self.flip, False)), (x + offset[0] + self.render_offset[0] + self.movement_offset[0], int(y) + offset[1] + self.render_offset[1] + self.movement_offset[1]))
 
 
     def update(self):
@@ -89,13 +127,14 @@ class Gemstone(Entity):
         self.tick[0] = (self.tick[0] + 1) % self.tick[1]
         if self.pos == self.game.player.pos:
             self.hp = 0
-            self.game.player.invincibility = min(70 + self.game.level + (5 - self.game.lives) * 2, 120)
+            self.game.player.invincibility = min(100 + self.game.level + (5 - self.game.lives) * 2, 150)
             
-    def render(self, screen, offset):
+    def render(self, screen, offset, rect):
         i = (self.tick[0] % (20 * len(colors))) // 20
         img = change_color(self.sprite,colors[i])
         x,y = self.render_pos
-        screen.blit(pygame.transform.flip(img, self.flip, False), (x + offset[0] + self.render_offset[0] + self.movement_offset[0], int(y) + offset[1] + self.render_offset[1] + self.movement_offset[1]))
+        if self.rect((x,y),offset).colliderect(rect):
+            screen.blit(pygame.transform.flip(img, self.flip, False), (x + offset[0] + self.render_offset[0] + self.movement_offset[0], int(y) + offset[1] + self.render_offset[1] + self.movement_offset[1]))
 
 
 class Trap(Entity):
@@ -134,12 +173,17 @@ class Player(Entity):
         self.invincibility = 0
         self.tick = 2
         self.cooldown = 10
-        
+        self.z = self.at.z
+        self.gems = 0
+
+
     def reset(self):
         self.path = []
         self.idle = 0
+        self.action = 'idle'
         self.stun = 0
         self.egg = None
+        self.z = self.at.z
         self.movement_offset = [0,0]
         self.invincibility = 0
 
@@ -162,25 +206,27 @@ class Player(Entity):
             return self.sprite.img()
         return self.sprite.images[0]
 
-    def render(self, screen, offset):
+    def render(self, screen, offset, rect):
         x,y = self.render_pos
+        if not self.rect((x,y),offset).colliderect(rect):
+            return
         x += offset[0] + self.movement_offset[0] + self.render_offset[0]
         y += offset[1] + self.movement_offset[1] + self.render_offset[1]
         if self.action == 'walking' or self.idle > 0:
             img = self.sprite.img()
-            if self.invincibility > 0:
             
+            if self.invincibility > 0:
                 img = change_color(img, colors[self.game.tick[0] % len(colors)])
 
-            screen.blit(pygame.transform.flip(img, self.flip, False), (x,y))
+            screen.blit(self.cutout(pygame.transform.flip(img, self.flip, False)), (x,y))
         # elif self.idle > 100:
         #     screen.blit(pygame.transform.flip(self.sprite.img(), self.flip, False), (x,y))
         else:
-            img = self.sprite.images[1]
+            img = self.sprite.images[0]
             if self.invincibility > 0:
                 img = change_color(img, colors[self.game.tick[0] % len(colors)])
 
-            screen.blit(pygame.transform.flip(img, self.flip, False), (x,y))
+            screen.blit(self.cutout(pygame.transform.flip(img, self.flip, False)), (x,y))
            
             
     @property
@@ -193,6 +239,7 @@ class Player(Entity):
 
     def update(self, tick, movement=[0,0,0,0]):
         if tick % self.tick == 0:
+            print(movement)
             if self.invincibility > 0:
                 self.invincibility -= 1
                 self.stun = 0
@@ -227,6 +274,8 @@ class Player(Entity):
                 
                 if not in_tile(self.movement_offset, *diff):
                     new_player, diff2 = self.game.maze.border_check(self.pos, old)
+                    if abs(diff2[1]) == 10:
+                        self.z -= sign(diff2[1])
                     next_cell = self.game.maze.maze[new_player[1]][new_player[0]]
                     if next_cell.type == 'Glass_Tile':
                         if not next_cell.active:
@@ -238,8 +287,6 @@ class Player(Entity):
                     if self.pos != new_player:
                         old = self.movement_offset
                         self.movement_offset = move(self.movement_offset, *diff)
-                        # self.game.render_offset[0] -= diff[0]
-                        # self.game.render_offset[1] -= diff[1] + diff2[1] - 5 * sign(diff2[1])
                         if self.at.type == 'Glass_Tile':
                             self.game.maze.maze[self.y][self.x].deactive()
                     
@@ -248,8 +295,6 @@ class Player(Entity):
                 else:
                     old = self.movement_offset
                     self.movement_offset = move(self.movement_offset, *diff)
-                    # self.game.render_offset[0] -= self.movement_offset[0] - old[0]
-                    # self.game.render_offset[1] -= self.movement_offset[1] - old[1]
                     
 
             else:
@@ -342,7 +387,6 @@ class Enemy(Entity):
             if random.randint(0,100) == 0:
                 path = self.game.maze.trace(self.pos, self.game.player.pos)[:random.randint(35,50)]
                 self.path = path if path is not None else self.path
-                print("tracking player")
         elif self.game.tick[0] % self.tick == 0:
             next_coord = self.path[0]
             if tuple(next_coord[:2]) in pos_dict:
@@ -371,16 +415,25 @@ class Wisp(Enemy):
             return self.animation.img()
         return self.sprite
     
-    def render(self, screen, offset):
+    def render(self, screen, offset, rect):
         if self.active:
             x,y = self.render_pos
-            screen.blit(pygame.transform.flip(self.animation.img(), self.flip, False), (x + self.render_offset[0] + self.movement_offset[0] + offset[0], y + self.render_offset[1] + self.movement_offset[1] + offset[1]))
+            if self.rect((x,y),offset).colliderect(rect):
+                screen.blit(self.cutout(pygame.transform.flip(self.animation.img(), self.flip, False)), (x + self.render_offset[0] + self.movement_offset[0] + offset[0], y + self.render_offset[1] + self.movement_offset[1] + offset[1]))
         else:
-            return super().render(screen, [offset[0], offset[1] - self.render_offset[1]])
+            return super().render(screen, [offset[0], offset[1] - self.render_offset[1]], rect)
         
     def deactivate(self):
         self.active = False
         self.path = []
+        
+
+    def update_sound(self):
+        if not self.active:
+            if self.game.sound[-1] < 3:
+                self.game.sound = [self.game.sounds['wisp'], 3]
+        self.active = True
+                
         
     def update(self, pos_dict):
          x,y = self.render_pos
@@ -394,9 +447,10 @@ class Wisp(Enemy):
                 self.deactivate()
             elif len(self.path) > 0:
                 if self.path[-1][:2] == self.game.player.pos:
-                    self.active = True
+                    self.update_sound()
+
             elif len(path) in range(1,6):
-                self.active = True
+                self.update_sound()
                 self.path = path
          if self.active:
             self.animation.update()
@@ -419,10 +473,11 @@ class Plant(Enemy):
     def img(self):
         return self.game.assets['Plant/' + self.action].img()
         
-    def render(self, screen, offset):
+    def render(self, screen, offset, rect):
         x,y = self.render_pos
         y = y + 2 if self.action == 'idle' else y
-        screen.blit(pygame.transform.flip(self.game.assets['Plant/' + self.action].img(), self.flip, False), (x + self.render_offset[0] + self.movement_offset[0] + offset[0], y + self.render_offset[1] + self.movement_offset[1] + offset[1]))
+        if self.rect((x,y),offset).colliderect(rect):
+            screen.blit(self.cutout(pygame.transform.flip(self.game.assets['Plant/' + self.action].img(), self.flip, False)), (x + self.render_offset[0] + self.movement_offset[0] + offset[0], y + self.render_offset[1] + self.movement_offset[1] + offset[1]))
         
     def pot(self):
         self.active = False
@@ -464,8 +519,10 @@ class Converter(Enemy):
     def img(self):
         return self.sprite[0]
 
-    def render(self, screen, offset):
+    def render(self, screen, offset, rect):
         x,y = self.render_pos
+        if not self.rect((x,y),offset).colliderect(rect):
+            return
         if self.path != []:
             _sign = sign(self.path[0][0] - self.x) if sign(self.path[0][0] - self.x) != 0 else sign(self.path[0][1] - self.y) 
             if _sign < 0 :
@@ -473,7 +530,7 @@ class Converter(Enemy):
             elif _sign > 0:
                 self.variant = 0
 
-        screen.blit(pygame.transform.flip(self.sprite[self.variant], self.flip, False), (x + self.render_offset[0] + self.movement_offset[0] + offset[0], y + self.render_offset[1] + self.movement_offset[1] + offset[1]))
+        screen.blit(self.cutout(pygame.transform.flip(self.sprite[self.variant], self.flip, False)), (x + self.render_offset[0] + self.movement_offset[0] + offset[0], y + self.render_offset[1] + self.movement_offset[1] + offset[1]))
         
 
     def update(self, pos_dict):
@@ -492,7 +549,7 @@ class Constructor(Enemy):
     def __init__(self, game, pos, sprite, hp=1, render_offset=[0, 0], e_type=None):
         super().__init__(game, pos, sprite, hp, render_offset, e_type)
         self.tick = 5
-        self.cooldown = [0,1000 - min(970, 10 * self.game.level)]
+        self.cooldown = [0,max(900 - self.game.level * 10, 30)]
         
     def random_step(self, dx, dy):
         options = []
@@ -545,12 +602,17 @@ class Constructor(Enemy):
             if self.at.get_accessible_neighbor(nx,ny) is None:
                 if not cell_valid((px,py), self.game.maze):
                     self.game.maze.maze[py][px] = structures_factory(self.game.maze, 'Temp_Tile', self.at.z1, px,py)
+                    cell = self.game.maze.maze[py][px]
+                    x_,y_ = cell.render_pos
+                    ox, oy = self.game.maze.offset
                     if neighbor_check(self.game.maze.maze[py][px]):
-                        self.gems = max(self.gems - 2, 0)   
-                        self.cooldown[0] = 0
+                        if self.cooldown[0] == self.cooldown[1]:
+                            self.cooldown[0] = 0
+                        else:
+                            self.gems = max(self.gems - 2, 0)   
+                        self.game.maze.static_surface.blit(cell.cutout,(x_ - ox, y_ - oy))
                     else:
                         self.game.maze.maze[py][px] = None
-            
         super().update(pos_dict)
         self.flip = False
         
@@ -558,14 +620,16 @@ class Constructor(Enemy):
 class Trapper(Enemy):
     def __init__(self, game, pos, sprite, hp=1, render_offset=[0, 0], e_type=None):
         super().__init__(game, pos, sprite, hp, render_offset, e_type)
-        self.capcacity = max(10, self.game.level)
+        self.capcacity = max(10, self.game.level // 1.5)
+        self.cooldown = [0,45]
 
     def lay_trap(self):
         if len(self.game.traps) < self.capcacity and abs(self.x - self.game.player.x) < 10 and abs(self.y - self.game.player.y) < 10:
             if (self.x, self.y) not in self.game.traps and self.at.type in ('Tile', 'Temp_Tile', 'Elevator'):
                 self.game.traps[(self.x,self.y)] = Trap(self.game, self.pos, self.game.assets['Trap'])
-                print("TRAP")
 
     def update(self, pos_dict):
-        self.lay_trap()
+        if self.cooldown[0] == 0:
+            self.lay_trap()
+        self.cooldown[0] = (self.cooldown[0] + 1) % self.cooldown[1]
         super().update(pos_dict)

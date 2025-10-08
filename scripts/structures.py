@@ -11,20 +11,23 @@ def reduce_coord(x, y):
     else:
         return 0, int(y/abs(y))   
         
-    
-class Tile:
-    def __init__(self, maze, z, x, y, player_tile=False):
+
+class Base:
+    def __init__(self, maze, z, x, y):
+        '''
+        Base initializer - includes tile_outline, back_neighbors, but sprite set to None if not maze.assets[type]
+        '''
         self.maze = maze
         self.pos = z
         self.x, self.y = x, y
-        sprite_variant = self.maze.sprite_variant if self.maze.sprite_variant is not None else stable_randint(x, y, z, self.maze.game.level)
-        sprite = self.type
-        self.sprite = self.maze.assets[sprite][sprite_variant]
-        self.player_tile = player_tile
         self.tile_outline = set()
+        self.outline_surface = pygame.Surface((20,24), pygame.SRCALPHA)
         self.back_neighbors = []
-        
-       
+        self.sprite = self.maze.assets[self.type] if self.type in self.maze.assets else None
+        self.cover = self.sprite
+        self.wall_height = self.maze.wall_height if self.maze.wall_height is not None else (1 + (self.x * self.y + self.pos) % 5) * 2
+        self.mask = pygame.mask.from_surface(self.maze.assets['Tile'][0])
+    
     @property
     def z(self):
         return self.pos
@@ -40,6 +43,38 @@ class Tile:
     def z1(self):
         return self.pos
     
+    @property
+    def cutout(self):
+        x,y = self.render_pos
+        x = round(x)
+        y = round(y)
+        img = self.sprite.copy() 
+        if self.maze.render_mode:
+            for dy in range(0,3):
+                for dx in range(0,3):
+                    if dx == 0 and dy == 0:
+                        continue
+                    if not self.maze.in_range((self.x + dx, self.y + dy)):
+                        break
+                    else:
+                        neighbor = self.maze.maze[dy + self.y][dx + self.x]
+                        if neighbor is not None:
+                            if neighbor.type == 'Glass_Tile':
+                                continue
+                            if neighbor is not self:
+                                ox, oy = neighbor.render_pos
+                                diff = (ox - x, oy - y)
+                                overlap = self.mask.overlap_mask(self.mask, diff)
+                                result = self.mask.copy()
+                                result.erase(overlap, (0, 0))
+                                cutout = result.to_surface(setcolor=(255, 255, 255, 255),
+                                                            unsetcolor=(0, 0, 0, 0))
+                                cutout.set_colorkey((0, 0, 0))
+                                img.blit(cutout, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+
+        return img
+    
+
     @property
     def all_z(self):
         return [self.pos]
@@ -64,6 +99,17 @@ class Tile:
                             cells.add(cell)
         return cells
     
+    def rect(self, pos=None, offset=(0,0)):
+        try:
+            self.sprite.get_size()
+        except:
+            self.sprite.get_size()
+        x, y = pos if pos is not None else self.render_pos
+
+        ox, oy = offset
+        
+        return pygame.Rect(x + ox, y + oy, *self.sprite.get_size())
+
     def get_accessible_neighbor(self, dx,dy):
         ''' Gets the neighboring cell in the direction of dx and dy to the tile.
             Assumes dx,dy is reduced
@@ -76,20 +122,37 @@ class Tile:
             elif abs(y) > 1:
                 return 0, int(y/abs(y))   
             return x,y
-        dx,dy = reduce_coord(dx,dy)
-        if (cell_valid([dx + self.x, dy + self.y], self.maze)):
-            n = self.maze.maze[dy + self.y][dx + self.x]
-            for z in self.all_z:
-                for other_z in n.all_z:
-                    if abs(z - other_z) <= 1:
-                        return n
-        if (cell_valid([2 * dx + dy + self.x, 2 * dy + dx + self.y], self.maze)):
-            n = self.maze.maze[2 * dy + dx + self.y][2 * dx + dy + self.x]
-            for z in self.all_z:
-                for other_z in n.all_z:
-                    if other_z - z == -2:
-                        return n
-        return None
+        # try:
+        #     mapping = {
+        #         (0,0):(0,0),
+        #         (-1, 0): (-2, -1),
+        #         (1, 0): (2, 1),
+        #         (0, -1): (-1, -2),
+        #         (0, 1): (1, 2)
+        #     }
+        #     x0, y0 = self.render_pos
+        #     dx,dy = mapping[(dx,dy)]
+        #     for m in [5,10]:
+        #         cx, cy = dx * m + x0, dy * m + y0
+        #         if (cx,cy) in self.maze.render_positions:
+        #             return self.maze.render_positions[(cx,cy)]
+        #     return None
+        # except:
+        if 1:
+            dx,dy = reduce_coord(dx,dy)
+            if (cell_valid([dx + self.x, dy + self.y], self.maze)):
+                n = self.maze.maze[dy + self.y][dx + self.x]
+                for z in self.all_z:
+                    for other_z in n.all_z:
+                        if abs(z - other_z) <= 1:
+                            return n
+            if (cell_valid([2 * dx + dy + self.x, 2 * dy + dx + self.y], self.maze)):
+                n = self.maze.maze[2 * dy + dx + self.y][2 * dx + dy + self.x]
+                for z in self.all_z:
+                    for other_z in n.all_z:
+                        if other_z - z == -2:
+                            return n
+            return None
 
     def get_neighbor(self, dx, dy):
         ''' Gets the neighboring cell in the direction of dx and dy to the tile.
@@ -120,15 +183,7 @@ class Tile:
         iso_y -= self.z * (self.maze.TILE_HEIGHT // 2)  
         return [iso_x, iso_y]
 
-
-    def render(self, screen, h, offset, wall_spacing):
-        x,y = self.render_pos
-        for i in reversed(range(0,h)):
-            screen.blit(self.sprite, (x + offset[0], y + offset[1] + wall_spacing * i))
-            
-        for px, py in self.tile_outline:
-            screen.fill((95,87,79), (px+offset[0],py+offset[1],1,1))
-            
+        
     def update(self):
         pass
     
@@ -150,6 +205,11 @@ class Tile:
                 self.back_neighbors.append( (neighbor.x, neighbor.y) )
         
         self.tile_outline |= self.get_outline()
+        self.outline_surface = pygame.Surface((20,24), pygame.SRCALPHA)
+        self_x, self_y = self.render_pos
+        for px, py in self.tile_outline:
+            self.outline_surface.fill((95,87,79),(px - self_x, py - self_y, 1,1))
+            
         
         n0 = False
         n1 = self.get_neighbor(0,1)
@@ -199,14 +259,44 @@ class Tile:
         return border_points
 
 
-class Elevator(Tile):
+    def render(self, screen, rect, offset,):
+        x,y = self.render_pos
+        self_rect = self.rect((x,y), offset)
+        if self_rect.colliderect(rect):
+            screen.blit(self.sprite, (self_rect.topleft))
+            screen.blit(self.outline_surface,(self_rect.topleft))
+        
+class Tile(Base):
+    def __init__(self, maze, z, x, y, player_tile=False):
+        super().__init__(maze,z,x,y)
+        self.player_tile = player_tile
+        sprite_variant = stable_randint(x, y, z, self.maze.game.level)
+        sprite = self.type
+        self.sprite = self.maze.assets[sprite][sprite_variant]
+        asset_name = self.type + f"_{sprite_variant}_{self.wall_height}"
+        if asset_name not in self.maze.assets:
+            surface = pygame.Surface((20,18*self.wall_height), pygame.SRCALPHA)
+            for i in reversed(range(self.wall_height)):
+                surface.blit(self.sprite,(0, 12 * i))
+            self.maze.assets[asset_name] = surface
+        self.sprite = self.maze.assets[asset_name]
+        self.mask = pygame.mask.from_surface(self.sprite)
+        
+        
+    
+class Elevator(Base):
     def __init__(self, game, z, other_z, x, y):
         super().__init__(game, int(z), x, y)
         self.z2 = int(other_z)
         self.current_z = z
         self.direction = -1
         self.time_stopped = 0
-        
+        sprite_variant = stable_randint(x, y, z, self.maze.game.level)
+        self.sprite = self.maze.assets[self.type][sprite_variant]
+        self.front_neighbors = [pos for pos in [self.get_accessible_neighbor(0,1), self.get_accessible_neighbor(1,0)] if pos is not None]
+        self.mask = pygame.mask.from_surface(self.sprite)
+
+
     def __bool__(self): # returns if stopped
         return self.time_stopped <= 0
         
@@ -238,25 +328,33 @@ class Elevator(Tile):
         else:
             self.time_stopped -= 1 
 
-    def render(self, screen, h, offset, wall_spacing):
-        super().render(screen, 1, offset, wall_spacing)
+
+    def render(self, screen, rect, offset):
+        x,y = self.render_pos
+        x = round(x)
+        y = round(y)
+        self_rect = self.rect((x,y), offset)
+        
+        if self_rect.colliderect(rect):
+            img = self.cutout
+
+            screen.blit(img, self_rect.topleft)
+            screen.blit(self.outline_surface, self_rect.topleft)
+
         
        
-class Glass_Tile(Tile):
+class Glass_Tile(Base):
     
     def __init__(self, maze, z, x, y):
-        self.maze = maze
-        self.pos = z
-        self.x, self.y = x, y
+        super().__init__(maze,z,x,y)
         self.time = 0
-        self.sprite = self.maze.assets[self.type]
         intensity = .6
         alpha = int(255 * intensity)
         self.sprite.set_alpha(alpha)
-        self.sprite_grid = pygame.Surface(self.sprite.get_size(), pygame.SRCALPHA)
-        for px,py in get_border_points():
-            self.sprite_grid.set_at((px,py), (95,87,79))
-        self.back_neighbors = []
+        self.mask = pygame.mask.Mask((1,1), fill=False)
+        # self.sprite_grid = pygame.Surface(self.sprite.get_size(), pygame.SRCALPHA)
+        # for px,py in get_border_points():
+        #     self.sprite_grid.set_at((px,py), (95,87,79))
         
     @property
     def type(self):
@@ -268,32 +366,30 @@ class Glass_Tile(Tile):
     @property
     def active(self):
         return self.time <= 0
-        
+    
     def update(self):
         if self.time > 0:
             self.time -= 1
             
-    def render(self, screen, h, offset, wall_spacing):
+    def render(self, screen, rect, offset):
         if self.active:
             x,y = self.render_pos
-            screen.blit(self.sprite, (x + offset[0], y + offset[1]), special_flags=pygame.BLEND_ALPHA_SDL2)
-            color = (95,87,79)
+            if self.rect((x,y),offset).colliderect(rect):
+                screen.blit(self.sprite, (x + offset[0], y + offset[1]), special_flags=pygame.BLEND_ALPHA_SDL2)
+                color = (95,87,79)
             
-            for dx,dy in get_border_points():
-                screen.fill(color, (x+dx+offset[0], y+dy+offset[1],1,1))
+                for dx,dy in get_border_points():
+                    screen.fill(color, (x+dx+offset[0], y+dy+offset[1],1,1))
             # screen.blit(self.sprite_grid, (x + offset[0], y + offset[1]))
         
 
-class Player_Tile(Tile):
+class Player_Tile(Base):
     def __init__(self, maze, z, x, y):
-        self.maze = maze
-        self.pos = z
-        self.x, self.y = x, y
+        super().__init__(maze,z,x,y)
         self.sprite = self.maze.assets[self.type][0]
-        self.time = 60
         self.active = True
-        self.tile_outline = set()
-        self.back_neighbors = []
+        self.time = 60
+
 
     @property
     def type(self):
@@ -306,29 +402,28 @@ class Player_Tile(Tile):
 
     def update(self):
             
-        if not self.active:
-            if self.time <= 0:
-                self.maze.maze[self.y][self.x] = Tile(self.maze, self.z1, self.x, self.y, player_tile=True)
-                self.maze.maze[self.y][self.x].sprite = self.sprite
-                self.maze.maze[self.y][self.x].tile_outline = self.tile_outline
-                
-            else:
-                self.time -= 1
-            
+        if not self.active and self.time <= 0:
+            self.maze.maze[self.y][self.x] = Tile(self.maze, self.z1, self.x, self.y, player_tile=True)
+            self.maze.maze[self.y][self.x].sprite = self.sprite
+            self.maze.maze[self.y][self.x].tile_outline = self.tile_outline
+            ox, oy = self.maze.offset
+            x,y = self.render_pos
+            self.maze.maze[self.y][self.x].outline_surface = self.outline_surface
+            self.maze.static_surface.blit(self.cutout,(x - ox, y - oy))
+            self.maze.static_surface.blit(self.maze.maze[self.y][self.x].outline_surface,(x - ox, y - oy))
+            if self.maze.game.sound[-1] < 3:
+                self.maze.game.sound = [self.maze.game.sounds['player_tile'], 3]
+        self.time -= 1
 
     
-class Enemy_Tile(Tile):
+class Enemy_Tile(Base):
     
     def __init__(self, maze, z, x, y, cooldown=None):
-        self.maze = maze
-        self.pos = z
-        self.x, self.y = x, y
+        super().__init__(maze,z,x,y)
         self.time = cooldown if cooldown is not None else 2
         self.cooldown = cooldown
-        self.sprite = self.maze.assets[self.type]
-        self.tile_outline = set()
-        self.back_neighbors = []
-        
+        self.sprites = self.sprite 
+        self.sprite = self.sprite[0]
     
     @property
     def type(self):
@@ -345,54 +440,44 @@ class Enemy_Tile(Tile):
                     self.maze.game.player.stun = 10
                 self.time = -self.time * self.cooldown
                     
-                    
-                    
             else:
                 self.time -= sign(self.time)
                 
             
-    def render(self, screen, h, offset, wall_spacing):
+    def render(self, screen, rect, offset, ):
         if self.active:
-            sprite = self.sprite[0]
+            sprite = self.sprites[0]
         else:
-            sprite = self.sprite[1]
+            sprite = self.sprites[1]
 
         x,y = self.render_pos
-        screen.blit(sprite, (x + offset[0], y + offset[1]))
-        for px, py in self.tile_outline:
-            screen.fill((95,87,79), (px+offset[0],py+offset[1],1,1))
+        if self.rect((x,y), offset).colliderect(rect):
+            screen.blit(sprite, (x + offset[0], y + offset[1]))
+            for px, py in self.tile_outline:
+                screen.fill((95,87,79), (px+offset[0],py+offset[1],1,1))
 
         
-class Plant_Tile(Tile):
+class Plant_Tile(Base):
     
     def __init__(self, maze, z, x, y):
-        self.maze = maze
-        self.pos = z
-        self.x, self.y = x, y
-        self.sprite = self.maze.assets['Plant_Tile']
+        super().__init__(maze, z, x, y)
         self.occupied = False
-        self.back_neighbors = []
-        self.tile_outline = set()
+        
+
         
     @property
     def type(self):
         return 'Plant_Tile'
     
 
-class Portal_Tile(Tile):
+class Portal_Tile(Base):
     
     def __init__(self, maze, z, x, y):
-        self.maze = maze
-        self.pos = z
-        self.x, self.y = x, y
-        self.sprite = self.maze.assets[self.type]
+        super().__init__(maze,z,x,y)
         self.animation = self.maze.assets[self.type + '_']
         self.active = False
-        self.tile_outline = set()
-        self.back_neighbors = []
         intensity = .6
         alpha = int(255 * intensity)
-
 
     @property
     def type(self):
@@ -402,6 +487,7 @@ class Portal_Tile(Tile):
         if self.maze.game.player.gems >= 100:
             if self.maze.game.player.pos == [self.x, self.y]:
                 self.maze.game.skip = True
+                self.maze.game.score += 50
             else:
                 self.active = True
                 self.animation.update()
@@ -409,35 +495,30 @@ class Portal_Tile(Tile):
         else:
             self.active = False
             
-    def render(self, screen, h, offset, wall_spacing):
+    def render(self, screen, rect, offset, ):
         sprite = self.sprite
         
         if self.active:
             sprite = self.animation.img()
 
         x,y = self.render_pos
-        for i in reversed(range(0,h // 2)):
-            screen.blit(sprite, (x + offset[0], y + offset[1] + wall_spacing * i))
-        for px, py in self.tile_outline:
-            screen.fill((95,87,79), (px+offset[0],py+offset[1],1,1))
+        self_rect = self.rect((x,y), offset)
+        if self_rect.colliderect(rect):
+            screen.blit(sprite, (x + offset[0], y + offset[1]))
+            screen.blit(self.outline_surface, (x + offset[0], y + offset[1]))
+        if self.rect((x,y), offset).colliderect(rect):
+            for px, py in self.tile_outline:
+                screen.fill((95,87,79), (px+offset[0],py+offset[1],1,1))
             
 
-class Temp_Tile(Tile):
+class Temp_Tile(Base):
     def __init__(self, maze, z, x, y):
-        self.maze = maze
-        self.pos = z
-        self.x, self.y = x, y
-        self.sprite = self.maze.assets['Temp_Tile']
-        self.back_neighbors = []
+        super().__init__(maze,z,x,y)
         for dx,dy in [(0,1),(1,0)]:
-            n = self.get_accessible_neighbor(dx,dy)
+            n = self.get_neighbor(dx,dy)
             if n is not None:
                 n.back_neighbors.append((self.x,self.y))
-        
-
-    def render(self, screen, h, offset, wall_spacing):
-        x,y = self.render_pos
-        screen.blit(self.sprite, (x + offset[0], y + offset[1]))
+        self.mask = pygame.mask.from_surface(self.sprite)
         
     @property
     def type(self):
