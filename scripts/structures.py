@@ -1,4 +1,5 @@
 import random
+import copy
 from scripts.utils import *
 
 
@@ -28,6 +29,26 @@ class Base:
         self.wall_height = self.maze.wall_height if self.maze.wall_height is not None else (1 + (self.x * self.y + self.pos) % 5) * 2
         self.mask = pygame.mask.from_surface(self.maze.assets['Tile'][0])
     
+
+    def clone(self):
+        cls = self.__class__
+        new_tile = cls.__new__(cls)
+
+        for k, v in self.__dict__.items():
+            # Shared Pygame or heavy objects — keep same reference
+            if isinstance(v, (pygame.Surface, pygame.Rect, pygame.mask.Mask, pygame.sprite.Sprite)):
+                setattr(new_tile, k, v)
+
+            # Lists/sets/dicts — shallow copy to avoid shared references
+            elif isinstance(v, (list, dict, set)):
+                setattr(new_tile, k, v.copy())
+
+            # Everything else — assign directly
+            else:
+                setattr(new_tile, k, v)
+
+        return new_tile
+
     @property
     def z(self):
         return self.pos
@@ -59,12 +80,12 @@ class Base:
                     else:
                         neighbor = self.maze.maze[dy + self.y][dx + self.x]
                         if neighbor is not None:
-                            if neighbor.type == 'Glass_Tile':
+                            if neighbor.type in ('Glass_Tile', 'Elevator'):
                                 continue
                             if neighbor is not self:
                                 ox, oy = neighbor.render_pos
                                 diff = (ox - x, oy - y)
-                                overlap = self.mask.overlap_mask(self.mask, diff)
+                                overlap = self.mask.overlap_mask(neighbor.mask, diff)
                                 result = self.mask.copy()
                                 result.erase(overlap, (0, 0))
                                 cutout = result.to_surface(setcolor=(255, 255, 255, 255),
@@ -114,6 +135,11 @@ class Base:
         ''' Gets the neighboring cell in the direction of dx and dy to the tile.
             Assumes dx,dy is reduced
         '''
+
+        def step(a,b):
+            sign_ = sign(a) if a != 0 else sign(b)
+            return (a + sign_, b + sign_)
+
         def reduce_coord(x, y):
             if abs(x) <= 1 and abs(y) <= 1:
                 return x, y
@@ -122,37 +148,24 @@ class Base:
             elif abs(y) > 1:
                 return 0, int(y/abs(y))   
             return x,y
-        # try:
-        #     mapping = {
-        #         (0,0):(0,0),
-        #         (-1, 0): (-2, -1),
-        #         (1, 0): (2, 1),
-        #         (0, -1): (-1, -2),
-        #         (0, 1): (1, 2)
-        #     }
-        #     x0, y0 = self.render_pos
-        #     dx,dy = mapping[(dx,dy)]
-        #     for m in [5,10]:
-        #         cx, cy = dx * m + x0, dy * m + y0
-        #         if (cx,cy) in self.maze.render_positions:
-        #             return self.maze.render_positions[(cx,cy)]
-        #     return None
-        # except:
-        if 1:
-            dx,dy = reduce_coord(dx,dy)
+        dx,dy = reduce_coord(dx,dy)
+        for i in range(23):
+            if not self.maze.in_range([dx + self.x, dy + self.y]):
+                return None
+
             if (cell_valid([dx + self.x, dy + self.y], self.maze)):
                 n = self.maze.maze[dy + self.y][dx + self.x]
                 for z in self.all_z:
                     for other_z in n.all_z:
-                        if abs(z - other_z) <= 1:
+                        if i == 0 and -2 < other_z - z < 2:
                             return n
-            if (cell_valid([2 * dx + dy + self.x, 2 * dy + dx + self.y], self.maze)):
-                n = self.maze.maze[2 * dy + dx + self.y][2 * dx + dy + self.x]
-                for z in self.all_z:
-                    for other_z in n.all_z:
-                        if other_z - z == -2:
+
+                        elif other_z - z == -2 - i:
                             return n
-            return None
+
+            dx,dy = step(dx,dy)
+
+        return None
 
     def get_neighbor(self, dx, dy):
         ''' Gets the neighboring cell in the direction of dx and dy to the tile.
