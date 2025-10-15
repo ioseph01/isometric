@@ -1,5 +1,5 @@
 from scripts.maze import NEIGHBORS
-from scripts.utils import cell_type, cell_valid, get_cell_type, in_range, sign, to_iso
+from scripts.utils import cell_type, cell_valid, get_cell_type, in_range, sign, to_iso, stable_randint
 from scripts.structures import Enemy_Tile, Player_Tile, Tile, structures_factory
 import pygame
 import random 
@@ -88,24 +88,25 @@ class Entity:
         x = round(x) + self.render_offset[0] + self.movement_offset[0]
         y = round(y) + self.render_offset[1] + self.movement_offset[1]
         if self.game.maze.render_mode:
-            for dy in range(0,2):
-                for dx in range(0,2):
+            for dy in range(0,3):
+                for dx in range(0,3):
                     if dx == 0 and dy == 0:
                         continue
                     if not self.game.maze.in_range((self.x + dx, self.y + dy)):
                         continue
                     neighbor = self.game.maze.maze[dy + self.y][dx + self.x]
                     if neighbor is not None:
-                        if neighbor.type != "Glass_Tile" and (self.at.z < neighbor.z) or self.type == 'Elevator':
+                        if neighbor.type != "Glass_Tile" and (self.at.z < neighbor.z):
                             ox, oy = neighbor.render_pos
                             diff = (ox - x, oy - y)
                             overlap = self.mask.overlap_mask(neighbor.mask, diff)
-                            result = self.mask.copy()
-                            result.erase(overlap, (0, 0))
-                            cutout = result.to_surface(setcolor=(255, 255, 255, 255),
-                                                        unsetcolor=(0, 0, 0, 0))
-                            cutout.set_colorkey((0, 0, 0))
-                            img.blit(cutout, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+                            if overlap.count() > 0:
+                                result = self.mask.copy()
+                                result.erase(overlap, (0, 0))
+                                cutout = result.to_surface(setcolor=(255, 255, 255, 255),
+                                                            unsetcolor=(0, 0, 0, 0))
+                                cutout.set_colorkey((0, 0, 0))
+                                img.blit(cutout, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
 
         return img
 
@@ -151,6 +152,7 @@ class Trap(Entity):
             if self.game.player.invincibility <= 0:
                 self.game.player.stun += 4
                 self.game.player.gems = max(0, self.game.player.gems - 1)
+                self.game.sound[0] = self.game.sounds['trap']
             self.hp = 0
             
     
@@ -175,6 +177,7 @@ class Player(Entity):
         self.cooldown = 10
         self.z = self.at.z
         self.gems = 0
+        self.test = True
 
 
     def reset(self):
@@ -183,7 +186,7 @@ class Player(Entity):
         self.action = 'idle'
         self.stun = 0
         self.egg = None
-        self.z = self.at.z
+        self.z = stable_randint(self.x, self.y, self.at.z, self.game.level, min_val=0, max_val=6)
         self.movement_offset = [0,0]
         self.invincibility = 0
 
@@ -192,11 +195,14 @@ class Player(Entity):
             self.egg_offset = self.movement_offset    
             self.egg = self.pos
             self.gems -= self.cooldown
+            self.game.sounds['create_egg'].play()
+
             
     def destroy_egg(self):
         if self.egg is not None:
             self.pos = self.egg
             self.game.render_offset = self.game.test()
+            self.game.sounds['destroy_egg'].play()
             
         self.egg = None
         
@@ -236,10 +242,114 @@ class Player(Entity):
         
         return self.path[0]
 
+    def process_movement(self, movement):
+        # print(movement[1] - movement[3], movement[0] - movement[2])
+        # new_movement = [movement[1] - movement[3], movement[0] - movement[2]]
+        # if new_movement[0] != 0 and new_movement[1] != 0:
+        #     return 'Diagonal'
+        # if new_movement[0] != 0 or new_movement[1] != 0:
+        #     return 'Straight'
+        return 'None'
+
+
+    def get_fallback_by_quadrant(self, q, dx, dy):
+        pairs = {
+            1: [(1, 0), (0, -1)],
+            2: [(-1, 0), (0, -1)],
+            3: [(-1, 0), (0, 1)],
+            4: [(1, 0), (0, 1)],
+        }
+        if q not in pairs:
+            return None
+
+        a, b = pairs[q]
+
+        if (dx, dy) == a:
+            fx, fy = b
+        elif (dx, dy) == b:
+            fx, fy = a
+        else:
+            return None  # Not a simple cardinal move
+
+        # Flip both signs for fallback
+        return (-fx, -fy)
+
+
+
+    def move_player(self, dx, dy):
+        """
+        Move player on a 2D array of isometric tiles with offsets.
+        dx, dy: NESW movement deltas (exactly one nonzero)
+        """
+        # print(self.movement_offset)  # debug
+
+        ox, oy = self.movement_offset
+        tx, ty = self.at.x, self.at.y
+        print(dx,dy)
+        # Apply move with proper X scaling
+        dx_ = dx
+        dy_ = dy
+        _ox = ox - dx
+        _oy = oy + dy
+        dx *= -2
+        dy *= 1
+
+        new_ox = ox + dx
+        new_oy = oy + dy
+
+        if in_tile([ox, oy], dx,dy):
+            self.movement_offset = [new_ox, new_oy]
+            # print(self.movement_offset, self.pos)
+            return -1
+
+        new_tx, new_ty = tx, ty
+        quadrant = -1
+        # What does -8,0 go to? It maps to Q2 and Q3 in this, we need to add edge cases for axis unforatnutely..sadasdadasjld;a
+        if 0 <= _ox and _oy <= 0:        # Q1
+            quadrant = 1
+            if sign(dx) == 1 or sign(dy) == -1:
+                new_tx -= 1
+        elif _ox <= 0 and _oy <= 0:     # Q2
+            quadrant = 2
+            if sign(dx) == -1 or sign(dy) == -1:
+                new_ty -= 1
+        elif _ox < 0 and 0 < _oy:       # Q3
+            quadrant = 3
+            if sign(dx) == -1 or sign(dy) == 1:
+                new_tx += 1
+        elif 0 <= _ox and 0 <= _oy:       # Q4
+            quadrant = 4
+            if sign(dx) == 1 or sign(dy) == 1:
+                new_ty += 1
+        else:
+            print("IDK")
+            # Axis-aligned (ox==0 or oy==0)
+            if dx != 0:
+                new_tx = -1
+                new_ty = 1
+            elif dy != 0:
+                new_ty += -1 if oy >= 0 else 1
+
+        # print("Quadrant", quadrant, self.movement_offset, self.pos)
+        new_offset = move([ox,oy],dx,dy)
+        
+        # Check if next tile is valid
+        if tx != new_tx or ty != new_ty:
+            if cell_valid([new_tx, new_ty], self.game.maze):
+                next_cell = self.game.maze.maze[new_ty][new_tx]
+                # Optional: check height difference or blocking tiles
+                if -3 < next_cell.z - self.at.z < 2:
+                    self.pos = [next_cell.x, next_cell.y]
+                    self.movement_offset = new_offset
+                    return -1
+        return quadrant
+
+
 
     def update(self, tick, movement=[0,0,0,0]):
+        if movement != [False, False, False, False]:
+            self.process_movement(movement)
         if tick % self.tick == 0:
-            print(movement)
             if self.invincibility > 0:
                 self.invincibility -= 1
                 self.stun = 0
@@ -252,7 +362,14 @@ class Player(Entity):
             if self.at.type == 'Player_Tile':
                 self.at.deactivate()
             diff = [movement[1] - movement[3], movement[0] - movement[2]]
-            
+            # if self.test:
+            #     if diff != [0,0]:
+            #         if (q := self.move_player(*diff)) > 0:
+            #             m = self.get_fallback_by_quadrant(q, *diff)
+            #             if m is not None:
+            #                 print("New movement", m)
+            #                 self.move_player(*m)
+            #     return
             if diff[0] != 0 and diff[1] != 0:
                 old = random.choice([ [ 0, diff[1] ], [ diff[0], 0 ] ])
             else:
@@ -536,10 +653,14 @@ class Converter(Enemy):
     def update(self, pos_dict):
         if self.at.type == 'Tile' and self.movement_offset == [0,0]:
             if self.at.player_tile:
+                ox, oy = self.game.maze.offset
                 for tile in self.at.adjacent_cells | {self.at}:
                     if tile.type == 'Tile':
                         if tile.player_tile:
                             self.game.maze.maze[tile.y][tile.x] = Enemy_Tile(self.game.maze, tile.z, tile.x, tile.y, cooldown=None)
+                            x_, y_ = self.game.maze.maze[tile.y][tile.x].render_pos
+                            self.game.maze.static_surface.blit(self.game.maze.maze[tile.y][tile.x].cutout,(x_ - ox, y_ - oy))
+
                 self.hp = 0
                 return
         super().update(pos_dict)

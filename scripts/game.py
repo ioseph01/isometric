@@ -1,9 +1,9 @@
 ﻿import pygame
 import random
 from scripts.animation import Animation
-from scripts.entities import Constructor, Converter, Enemy, Entity, Gem, Plant, Player, Trapper, Wisp, Gemstone
+from scripts.entities import Constructor, Converter, Enemy, Entity, Gem, Plant, Player, Tile, Trapper, Wisp, Gemstone
 from scripts.maze import Maze
-from scripts.structures import Plant_Tile, Portal_Tile
+from scripts.structures import Plant_Tile, Portal_Tile, structures_factory
 from scripts.utils import *
 
 NEIGHBORS = {(-1,0),(0,-1),(1,0),(0,1)}
@@ -59,8 +59,17 @@ class Game:
             'powerup': load_sound("powerup.wav"),
             'player_tile': load_sound('player_tile.wav'),
             'death': load_sound('death.wav'),
-            'wisp': load_sound('wisp.wav')
+            'wisp': load_sound('wisp.wav'),
+            'trap': load_sound('trap.wav'),
+            'teleport': load_sound('teleport.wav'),
+            'destroy_egg': load_sound('destroy_egg.wav'),
+            'create_egg': load_sound('lay_egg.wav'),
             }
+        for s in self.sounds['gem']:
+            s.set_volume(0.2)
+        self.sounds['teleport'].set_volume(0.2)
+        self.sounds['player_tile'].set_volume(0.6)
+        self.sounds['death'].set_volume(0.6)
         
     def load_assets(self):
         
@@ -108,7 +117,7 @@ class Game:
             factory = [Enemy(self, (x,y), self.assets['entity'], render_offset=[0,-8], e_type='Enemy'),Wisp(self, (x,y), self.assets['gem'], render_offset=[0,-15], e_type='Enemy'),
                 Plant(self, (x,y), None, render_offset=[0,-12], e_type='Enemy'),Converter(self, (x,y), [replace_colors(img, self.color_table) for img in self.assets['Converter']], render_offset=[0,-2], e_type='Enemy'),
                 Constructor(self, (x,y), replace_colors(self.assets['Constructor'], self.color_table), render_offset=[0,-8], e_type='Enemy'),
-                Trapper(self, (x,y), self.assets['Trapper'], render_offset=[0,-4], e_type='Enemy')
+                Trapper(self, (x,y), replace_colors(self.assets['Trapper'], self.color_table), render_offset=[0,-4], e_type='Enemy')
                 ]
             result = random.choices(factory,weights=weights,k=1)[0]
             self.entities.append(result)
@@ -132,10 +141,10 @@ class Game:
         self.controller.font.render(screen, '@' * self.lives, (40,35))
         self.controller.font.render(screen, f'{min(self.player.gems, 100)}/{self.player.cooldown}', (40,55))
         
-        pygame.draw.rect(screen, self.color_table[(0,0,255)], (480,5,140,80))
-        pygame.draw.rect(screen, BLACK, (485,10,130,70))
-        self.controller.font.render(screen, f'Level {self.level}', (500,15))
-        self.controller.font.render(screen, f'Stage {self.stage + 1}', (500,35))
+        pygame.draw.rect(screen, self.color_table[(0,0,255)], (560,5,140,60))
+        pygame.draw.rect(screen, BLACK, (565,10,130,50))
+        self.controller.font.render(screen, f'Level {self.level}', (580,15))
+        self.controller.font.render(screen, f'Stage {self.stage + 1}', (580,35))
     
 
     
@@ -238,7 +247,7 @@ class Game:
                     if gem.at != 'Portal_Tile'
                 }
                 self.maze.set_tile_outline()
-                self.player.z = self.player.at.z
+                self.player.z = stable_randint(self.player.x, self.player.y, self.player.at.z, self.level, min_val=0, max_val=6)
                 return
             except RuntimeError:
                 pass
@@ -251,7 +260,13 @@ class Game:
 
     def death(self):
         self.sounds['death'].play()
-        maze = self.maze.maze
+        maze = [ [None for j in range(len(self.maze.maze[0]))] for i in range(len(self.maze.maze))]
+        for i, row in enumerate(self.maze.maze):
+            for j, cell in enumerate(row):
+                if cell is not None:
+                    maze[i][j] = cell.clone()
+        maze = [row[:] for row in self.maze.maze]
+
         d1 = random.randint(5, 22 - (self.lives * 2) ) if self.level % 2 == 0 else 1
         d2 = random.randint(5, max(5, (self.lives - 8) ** 2)) if self.level % 2 == 1 else 1
                             
@@ -259,13 +274,14 @@ class Game:
         for i in range(2):
             self.maze.fix_maze(self.maze.maze)
         self.maze.add_elevators(90 - 15 * self.lives)
-        
         if not self.maze.connectivity():
+            print("Not connected: no change")
             self.maze.maze = maze
-        for i, row in enumerate(self.maze.maze):
-            for j, cell in enumerate(row):
-                if self.maze.maze[i][j] is not None:
-                    self.maze.maze[i][j].tile_outline = set()
+        else:
+            for i, row in enumerate(self.maze.maze):
+                for j, cell in enumerate(row):
+                    if self.maze.maze[i][j] is not None:
+                        self.maze.maze[i][j].tile_outline = set()
 
         self.maze.set_tile_outline()
         egg = self.player.egg
@@ -286,6 +302,8 @@ class Game:
 
     def update(self, events, screen):
             if self.skip:
+                self.sounds['teleport'].play()
+
                 self.skip = False
                 self.stage = True
                 self.gems = set()
@@ -401,8 +419,70 @@ class Game:
                             self.player.destroy_egg()
                     if event.key in (pygame.K_9, pygame.K_i, pygame.K_c):
                             self.player.create_egg()
+                    if event.key == pygame.K_b:
+                        self.player.invincibility = 20000
+                    if event.key == pygame.K_z:
+                        self.gems = set()
                     if event.key == pygame.K_x:
                         self.maze.print_maze()
+                        print(self.maze.connectivity())
+                    if event.key == pygame.K_k:
+                        def step(a,b):
+                            sign_ = sign(a) if a != 0 else sign(b)
+                            return (a + sign_, b + sign_)
+                        self.entities = []
+                        dx,dy = 0,1
+                        if self.paused:
+                            dx,dy = 1,0
+                        x,y = self.player.pos
+                        print(f"[{x},{y}]", self.player.at)
+                        for i in range(10):
+                            if self.maze.in_range((x + dx,y + dy)):
+                                # print(x + dx,y + dy)
+                                print(f"[{dx + x},{dy + y}]",self.maze.maze[y][x])
+                                dx,dy = step(dx,dy)
+                        print("+++++++++++++++++++++++++++++++++++++++++++++++++++")
+
+                    if event.key == pygame.K_u:
+                        _ = None
+                        self.maze.maze = [
+                                        [_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_],
+                                        [_,5,4,4,4,4,4,4,4,4,4,4,4,4,4,0,_,1,1,1,_],
+                                        [_,5,4,_,_,4,4,4,4,_,_,_,_,4,_,_,_,1,_,1,_],
+                                        [_,5,3,2,1,0,_,4,4,4,_,4,4,3,_,1,1,1,_,1,_],
+                                        [_,5,_,2,_,0,_,1,0,_,_,0,_,2,_,0,_,_,_,1,_],
+                                        [_,5,5,2,1,0,_,_,_,0,0,0,_,1,_,0,_,1,1,0,_],
+                                        [_,5,5,_,1,0,_,_,_,0,_,_,_,0,0,0,_,1,_,_,_],
+                                        [_,4,4,0,_,0,0,0,0,0,0,_,_,0,0,0,_,1,1,0,_],
+                                        [_,3,3,_,_,0,_,0,_,0,0,_,_,_,_,_,_,_,_,0,_],
+                                        [_,2,2,2,1,0,0,0,0,0,0,_,_,4,1,1,1,0,_,0,_],
+                                        [_,2,_,2,1,_,0,0,_,0,0,_,_,0,_,0,_,0,0,0,_],
+                                        [_,2,_,2,0,0,0,0,_,0,_,0,0,0,_,0,0,0,_,0,_],
+                                        [_,2,2,2,_,_,0,_,_,_,_,0,0,_,_,0,_,0,_,0,_],
+                                        [_,1,_,2,2,0,0,0,0,0,0,0,0,0,_,0,0,0,_,0,_],
+                                        [_,1,_,_,_,_,0,_,_,_,_,0,0,0,0,0,0,_,_,0,_],
+                                        [_,1,1,1,1,1,0,0,_,1,1,0,_,0,_,0,0,0,0,0,_],
+                                        [_,1,_,_,_,_,_,0,_,1,_,_,_,0,0,0,0,0,0,0,_],
+                                        [_,0,0,0,_,0,0,0,0,0,0,0,_,0,_,0,0,0,0,0,_],
+                                        [_,0,0,_,_,0,0,_,0,_,_,0,_,0,0,0,_,0,_,_,_],
+                                        [_,0,0,0,0,0,0,0,0,0,0,0,_,0,0,0,_,0,0,0,_],
+                                        [_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_],
+
+                        ]
+
+
+                        for i, row in enumerate(self.maze.maze):
+                            for j, z in enumerate(row):
+                                if z is not None:
+                                    self.maze.maze[i][j] = Tile(self.maze,z,j,i)
+                        self.entities = []
+                        self.maze.width = len(self.maze.maze[0])
+                        self.maze.height = len(self.maze.maze)
+                        self.maze.print_maze()
+                        self.player.pos = [self.maze.width - 2, self.maze.height - 2]
+                        self.maze.set_tile_outline()
+                    if event.key == pygame.K_t:
+                        self.player.test = not self.player.test
                     if event.key == pygame.K_z:
                         self.gems = set()
                         self.sounds['gem'][int(self.player.z) % 7].play()

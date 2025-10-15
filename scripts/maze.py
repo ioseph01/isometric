@@ -35,11 +35,11 @@ class Maze:
         for i in range(10):
             self.init_settings['elevator_prob'] = max(i * 10 + elevator_prob, elevator_prob, 15)
             # self.maze = self.fix_maze(self.maze)
-            if not self.connectivity() or self.trace((1,1), (self.width - 2, self.height - 2)) == []:
+            if not self.connectivity() or self.trace([1,1], [self.w - 2, self.h - 2]) == []:
                 self.add_elevators(i * 10 + elevator_prob)
                 self.maze = self.fix_maze(self.maze)
             else:
-                self.maze = self.fix_maze(self.maze)
+                # self.maze = self.fix_maze(self.maze)
                 break
         else:
             raise RuntimeError
@@ -393,12 +393,7 @@ class Maze:
     def draw_map(self, screen, offset=(0,0), entities={}, border_layer=None, rect=None, paused=False):
         ''' Maze render function '''
         if self.render_counter >= self.rows * self.cols and self.render_mode:
-            if not paused:
-                for y in range(self.h):
-                    for x in range(self.w):
-                        cell = self.maze[y][x]
-                        if cell is not None:
-                            cell.update()
+            
             screen.blit(self.static_surface,(offset[0] + self.offset[0], offset[1] + self.offset[1]))
             for x,y in self.animated_tiles:
                 self.maze[y][x].render(screen,rect,offset)
@@ -406,9 +401,15 @@ class Maze:
                 self.maze[y][x].render(screen,rect,offset)
             for x,y in self.glass_tiles:
                 self.maze[y][x].render(screen,rect,offset)
-            for k in entities:
-                for e in entities[k]:
-                    e.render(screen,offset, rect)
+            for y in range(self.h):
+                for x in range(self.w):
+                    cell = self.maze[y][x]
+                    if cell is not None:
+                        cell.update()
+                        if (x,y) in entities:
+                            for e in entities[(x,y)]:
+                                e.render(screen,offset, rect)
+            
             return
         counter = 0
         for y in range(self.h):
@@ -421,7 +422,10 @@ class Maze:
                     
                     if not paused and self.w*self.h <= self.render_counter:
                         tile.update()
-                    tile.render(screen, rect, offset)
+                    if tile.type in ("Enemy_Tile", "Portal_Tile"):
+                        pass
+                    else:
+                        tile.render(screen, rect, offset)
                     if (x,y) in entities:
                         for e in entities[(x,y)]:
                             e.render(screen, offset, rect)
@@ -451,7 +455,9 @@ class Maze:
         pos = [player[0] + direction[0], player[1] + direction[1]]
         locs = [10000,*player]
         diff = [0,0]
-        for i in range(2):
+        for i in range(21):
+            if not self.in_range(pos):
+                return locs[1:], diff
             if cell_valid(pos, self):
                 current = self.maze[player[1]][player[0]]
                 tile = current.z
@@ -465,7 +471,7 @@ class Maze:
                 i_x, i_y = other.render_pos
                 dx, dy = abs(ix - i_x), abs(iy - i_y)
                 
-                if dx <= 10 and dy <= 10 and dx + dy + abs(new_tile - tile) < locs[0] and i >= abs(new_tile - tile) - 1:
+                if dx <= 10 and dy <= 10 and dx + dy + abs(new_tile - tile) < locs[0]:
                     locs = [dx + dy + abs(new_tile - tile), *pos]
                     diff = [i_x - ix, i_y - iy]
             pos = [pos[0] + sign_, pos[1] + sign_]
@@ -602,13 +608,6 @@ class Maze:
 
 
     def set_tile_outline(self):
-        self.render_positions = {
-            tuple(cell.render_pos): cell
-            for y, col in enumerate(self.maze)
-            for x, cell in enumerate(col)
-            if cell is not None
-        }
-        self.render_positions = {}
         self.animated_tiles = set()
         self.elevator_tiles = set()
         self.glass_tiles = set()
@@ -638,7 +637,6 @@ class Maze:
             for cell in col:
                 if cell is not None:
                     x,y = cell.render_pos
-                    self.render_positions[(x,y)] = cell
                     if cell.type not in ("Elevator", "Glass_Tile"):
                         
                             cell.render(self.static_surface,rect,[-self.offset[0],-self.offset[1]])

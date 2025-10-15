@@ -10,7 +10,7 @@ class MainMenu:
         self.controller = controller
         self.options = ["Start Game", "Controls", "Quit"]
         self.selected = 0 
-        self.logo = load_image("logo.png")
+        self.logo = load_image("logo (2).png")
 
     def update(self, events, screen):
         self.draw(screen)
@@ -37,8 +37,8 @@ class MainMenu:
     def draw(self, surface):
         surface.fill((30, 30, 60))
         x = (720 - self.logo.get_width()) // 2
-        surface.blit(self.logo, (x,40))
-        padding, spacing = 200, 80
+        surface.blit(self.logo, (x,120))
+        padding, spacing = 240, 80
         for i, option in enumerate(self.options):
             y = padding + i * spacing
             text_width = self.controller.font.get_width(option)
