@@ -16,7 +16,7 @@ class Maze:
         self.height = height
         self.TILE_WIDTH, self.TILE_HEIGHT = 20, 10
         self.WALL_HEIGHT = wall_height
-        self.WALL_SPACING = 8
+        self.WALL_SPACING = 12
         
         self.init_settings = {
             'width': width, 'height': height, 'stair_probability': stair_prob, 'room attempts': room_attempts,
@@ -401,7 +401,7 @@ class Maze:
                     
                     if not paused and self.w*self.h <= self.render_counter:
                         tile.update()
-                    wall_height = self.WALL_HEIGHT * 2 if self.WALL_HEIGHT is not None else (1+(x*y*(tile.z1 + 1))%4) * 4
+                    wall_height = max(2, (self.WALL_HEIGHT * 2) % 10) if self.WALL_HEIGHT is not None else (1+(x*y*(tile.z1 + 1))%5) * 2
                     tile.render(screen, wall_height, offset, self.WALL_SPACING, rect)
                     if (x,y) in entities:
                         for e in entities[(x,y)]:
@@ -629,7 +629,7 @@ class Maze:
                 continue
             visited.add((x,y))
             cell = self.maze[y][x]
-            for adjacent in cell.adjacent_cells:
+            for adjacent in cell.accessible_adjacent_cells():
                 if (adjacent.x, adjacent.y) not in visited:
                     toVisit.add((adjacent.x, adjacent.y))
                     

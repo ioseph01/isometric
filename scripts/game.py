@@ -237,6 +237,7 @@ class Game:
         
         if not self.maze.connectivity():
             self.maze.maze = maze
+        
         for i, row in enumerate(self.maze.maze):
             for j, cell in enumerate(row):
                 if self.maze.maze[i][j] is not None:
@@ -354,6 +355,7 @@ class Game:
                 self.render_offset[1] -= (y - self.display.get_height() / 2) / 20
             if y < 0 + padding:
                 self.render_offset[1] -= (y - self.display.get_height() / 2) / 20
+                
             for event in events:
                 if event.type == pygame.QUIT:
                     self.quit()
@@ -364,6 +366,13 @@ class Game:
                             self.player.destroy_egg()
                     if event.key in (pygame.K_9, pygame.K_i, pygame.K_c):
                             self.player.create_egg()
+                    if event.key == pygame.K_h:
+                        self.lives += 1
+                        self.death()
+                    if event.key == pygame.K_g:
+                        self.gems = set()
+                    if event.key == pygame.K_f:
+                        self.entities = []
                     if event.key == pygame.K_p:
                         self.paused = not self.paused
                     if not self.paused:

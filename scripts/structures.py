@@ -68,6 +68,25 @@ class Tile:
         x, y = pos if pos is not None else self.render_pos
         ox, oy = offset
         return pygame.Rect(x + ox, y + oy, 20,24)
+    
+    def accessible_adjacent_cells(self):
+        ''' Returns cells that are connected to the tile '''
+        cells = set()
+        dirs = [(-1,0,range(2)),(1,0,range(-1,1)),(0,1,range(-1,1)),(0,-1,range(2)),(2,1,range(1,3)),(1,2,range(1,3)),(-2,-1,range(-2,0)),(-1,-2,range(-2,0))]
+        for dx, dy, dz in dirs:
+            if not self.maze.in_range([dx + self.x, dy + self.y]):
+                continue
+            cell = self.maze.maze[dy + self.y][dx + self.x]
+            if cell is not None:
+                if abs(dx) <= 1 and abs(dy) <= 1:
+                    for diff in self.z_check(cell):
+                        if abs(diff) in dz:
+                            cells.add(cell)
+                elif abs(dx) >= 1 and abs(dy) >= 1:
+                    for diff in self.z_check(cell):
+                        if diff in dz:
+                            cells.add(cell)
+        return cells
 
     def get_accessible_neighbor(self, dx,dy):
         ''' Gets the neighboring cell in the direction of dx and dy to the tile.
