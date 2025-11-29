@@ -6,9 +6,6 @@ import asyncio
 
 from scripts.windows import *
 from scripts.text import Font
-
-# -- Controller Class --
-
 import os
 
 class Controller:
@@ -19,24 +16,14 @@ class Controller:
             'Main_Menu': MainMenu(self),
             'Options': Options(self),
             'Stats': Stats(self),
-            'TestWindow': TestWindow(self),
+            # 'TestWindow': TestWindow(self),
         }
-        # self.mode = 'TestWindow'
         self.font = Font("small_font.png")
 
     @property
     def current(self):
         return self.windows[self.mode]
     
-class TestWindow:
-    def __init__(self, controller):
-        self.controller = controller
-        
-    def update(self, events, screen):
-        self.draw(screen)
-    def draw(self, screen):
-        screen.fill((255, 0, 0))  # Red screen
-        self.controller.font.render(screen, "HI!",(20,20))
 
 async def main():
     pygame.init()

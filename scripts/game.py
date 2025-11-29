@@ -18,7 +18,6 @@ class Game:
         self.sprite = "tile"
         self.display = pygame.Surface((240,180), pygame.SRCALPHA)
                 
-        print("Game Created part 1")
         self.render_offset = [0,0]
         self.movement = [False, False, False, False]
         self.load_assets()
@@ -46,7 +45,6 @@ class Game:
         self.lives = 5
         self.gem_count = 0
         self.skip = False
-        print("Game Created part 3, ready to run")
         self.start_level()
         
     def load_assets(self):
@@ -68,7 +66,6 @@ class Game:
             
         }
 
-        print("Game Created part 2, assets loaded")
         
     def start_level(self):
         self.player = Player(self, [1,1], self.assets['player/idle'], render_offset=[0,-12], e_type='Player')
@@ -128,7 +125,6 @@ class Game:
 
 
     def reset(self, skip=False):
-        print("Resetting Maze")
         WIDTH, HEIGHT = random.randint(5,10) * 2 + 1, self.maze.width
         if self.stage:
             times = 5 if skip else 1
@@ -172,7 +168,7 @@ class Game:
         for i in range(50):
             try:
                 sprite = 'tile'
-                self.maze = Maze(self, WIDTH, HEIGHT, self.assets['gem'], self.color_table, None, self.settings['stair_prob'], self.settings['room_attempts'],
+                self.maze = Maze(self, WIDTH, HEIGHT, self.assets['gem'], self.color_table, self.settings['stair_prob'], self.settings['room_attempts'],
                                  self.settings['sparsity'], self.settings['elevator_prob'], self.settings['player_prob'], self.settings['enemy_prob'], 30, self.settings['glass_prob'],
                                  wall_height=self.settings['wall_height'])
                 if skip:
@@ -356,10 +352,10 @@ class Game:
                     self.quit()
         
                 if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_0:
+                    if event.key in (pygame.K_0, pygame.K_o, pygame.K_v):
                         if self.player.egg is not None:
                             self.player.destroy_egg()
-                    if event.key == pygame.K_9:
+                    if event.key in (pygame.K_9, pygame.K_i, pygame.K_c):
                             self.player.create_egg()
                     if event.key == pygame.K_p:
                         self.paused = not self.paused

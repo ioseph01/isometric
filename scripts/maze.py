@@ -8,8 +8,7 @@ from scripts.utils import *
 NEIGHBORS = [(-1,0), (0,-1), (1,0), (0,1)]
 
 class Maze:
-    def __init__(self, game, width, height, gem_asset, color_table=None,
-                 sprite_variant=None, stair_prob=0, room_attempts=0, sparsity=[0,0], elevator_prob=0,
+    def __init__(self, game, width, height, gem_asset, color_table=None, stair_prob=0, room_attempts=0, sparsity=[0,0], elevator_prob=0,
                  friendlies_prob=0, enemies_prob=0, enemies_cooldown=None, glass_prob=0, wall_height=1):
         self.game = game
         self.maze = self.create_maze(width, height)
@@ -19,9 +18,8 @@ class Maze:
         self.WALL_HEIGHT = wall_height
         self.WALL_SPACING = 8
         
-        self.sprite_variant = sprite_variant
         self.init_settings = {
-            'width': width, 'height': height, 'sprite_variant':sprite_variant, 'stair_probability': stair_prob, 'room attempts': room_attempts,
+            'width': width, 'height': height, 'stair_probability': stair_prob, 'room attempts': room_attempts,
             'sparsity setting': sparsity, 'elevator_prob': elevator_prob, 'friendlies_prob': friendlies_prob, 'enemies_prob': enemies_prob,
             'glass_prob': glass_prob
             }
@@ -101,26 +99,6 @@ class Maze:
             height += 1
     
         return [[None for _ in range(width)] for _ in range(height)]
-
-
-    
-    # def print_maze(self, spacing=""):
-    #     def symbol(i):
-    #         if i >= 10:
-    #             return ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
-    #              'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
-    #              'U', 'V', 'W', 'X', 'Y', 'Z'][int((i - 10) % 26)]
-    #         return str(i)
-            
-    #     for x in range(self.cols):
-    #         col = ""
-    #         for y in range(self.rows):
-    #             if self.maze[y][x] is not None:
-    #                 col += symbol(int(self.maze[y][x].z))
-    #             else:
-    #                 col += "#"
-    #         print(col)
-    #     print(spacing, end="")
 
         
     def add_room(self, x, y, w, h):
@@ -636,22 +614,6 @@ class Maze:
                         toVisit.append(pos)
             return spawn_points
         return []
-
-
-    # def print_types(self, spacing=""):
-
-    #     for x in range(self.cols):
-    #         col = ""
-    #         for y in range(self.rows):
-    #             if self.maze[y][x] is not None:
-    #                 if self.maze[y][x].type == 'Enemy_Tile':
-    #                     col += 'e'
-    #                 else:
-    #                     col += self.maze[y][x].type[0]
-    #             else:
-    #                 col += "#"
-    #         print(col)
-    #     print(spacing, end="")
 
 
     def connectivity(self):
