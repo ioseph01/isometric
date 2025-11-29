@@ -342,7 +342,6 @@ class Enemy(Entity):
             if random.randint(0,100) == 0:
                 path = self.game.maze.trace(self.pos, self.game.player.pos)[:random.randint(35,50)]
                 self.path = path if path is not None else self.path
-                print("tracking player")
         elif self.game.tick[0] % self.tick == 0:
             next_coord = self.path[0]
             if tuple(next_coord[:2]) in pos_dict:
@@ -550,6 +549,17 @@ class Constructor(Enemy):
                         self.cooldown[0] = 0
                     else:
                         self.game.maze.maze[py][px] = None
+                # else:
+                #     if not cell_valid((px,py), self.game.maze):
+                #         self.game.maze.maze[py][px] = structures_factory(self.game.maze, 'Temp_Tile', self.at.z1 + i * 2 * sign_, px, py)
+                #         if neighbor_check(self.game.maze.maze[py][px]):
+                #             self.gems = max(self.gems - 2, 0)   
+                #             self.cooldown[0] = 0
+                #         else:
+                #             self.game.maze.maze[py][px] = None
+                                
+            
+            # lay down tile
             
         super().update(pos_dict)
         self.flip = False
@@ -564,7 +574,6 @@ class Trapper(Enemy):
         if len(self.game.traps) < self.capcacity and abs(self.x - self.game.player.x) < 10 and abs(self.y - self.game.player.y) < 10:
             if (self.x, self.y) not in self.game.traps and self.at.type in ('Tile', 'Temp_Tile', 'Elevator'):
                 self.game.traps[(self.x,self.y)] = Trap(self.game, self.pos, self.game.assets['Trap'])
-                print("TRAP")
 
     def update(self, pos_dict):
         self.lay_trap()

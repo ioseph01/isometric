@@ -17,7 +17,7 @@ def coord_add(a, b):
     return (a[0] + b[0], a[1] + b[1])
 
 
-BASE_IMG_PATH = 'img/'
+BASE_IMG_PATH = 'data/img/'
 
 def load_image(path):
     img = pygame.image.load(BASE_IMG_PATH + path).convert()

@@ -430,7 +430,7 @@ class Temp_Tile(Tile):
         self.sprite = self.maze.assets['Temp_Tile']
         self.back_neighbors = []
         for dx,dy in [(0,1),(1,0)]:
-            n = self.get_accessible_neighbor(dx,dy)
+            n = self.get_neighbor(dx,dy)
             if n is not None:
                 n.back_neighbors.append((self.x,self.y))
         
