@@ -415,17 +415,15 @@ class Player(Entity):
                     self.movement_offset = wrap_to_diamond_grid(self.movement_offset[0] + DX, self.movement_offset[1] + DY)['rel_coords']
                     self.pos = next_coords
 
-
+            else:
+                self.bounce(QUADRANT,DX,DY)
 
         else:
             self.movement_offset[0] = self.movement_offset[0] + DX
             self.movement_offset[1] = self.movement_offset[1] + DY
 
-
-                    
-
     def axis_movement(self, QUADRANT, dx, dy):
-        next_coords = self.pos
+        next_coords = None
         next_movement_offset = self.movement_offset
         if dx == -2 and QUADRANT == 7:
             if self.game.maze.trace(self.pos, (self.x + 1, self.y - 1), limit=2) != []:
@@ -444,12 +442,63 @@ class Player(Entity):
                 next_coords = [self.x + 1, self.y + 1]
                 next_movement_offset = [0,-4]
 
-        if self.validate_cell(self.game.maze.maze[next_coords[1]][next_coords[0]]):
-            if self.at.type == 'Glass_Tile':
-                self.game.maze.maze[self.y][self.x].deactive()
+        if next_coords is not None:
+            if self.validate_cell(self.game.maze.maze[next_coords[1]][next_coords[0]]):
+                if self.at.type == 'Glass_Tile':
+                    self.game.maze.maze[self.y][self.x].deactive()
 
-            self.movement_offset = next_movement_offset
-            self.pos = next_coords
+                self.movement_offset = next_movement_offset
+                self.pos = next_coords
+        else:
+            self.bounce(QUADRANT,dx,dy)
+    
+   
+    def bounce(self, quadrant, dx, dy):
+        if dx != 0 and dy == 0:
+            if quadrant in (1,2):
+                self.movement_offset[1] -= 1
+            elif quadrant in (3,4):
+                self.movement_offset[1] += 1
+            elif quadrant == 5:
+                if self.game.maze.border_check(self.pos,(0, 1))[0] != self.pos:
+                    self.movement_offset[1] += 1
+                if self.game.maze.border_check(self.pos,(-1,0))[0] != self.pos:
+                    self.movement_offset[1] -= 1
+
+            elif quadrant == 7:
+                if self.game.maze.border_check(self.pos,(1, 0))[0] != self.pos:
+                    self.movement_offset[1] += 1
+
+                elif self.game.maze.border_check(self.pos,(0, - 1))[0] != self.pos:
+                    self.movement_offset[1] -= 1
+
+
+        elif dx == 0 and dy != 0:
+            if quadrant in (2,3):
+                self.movement_offset[0] += 1
+                self.flip = True
+            elif quadrant in (1,4):
+                self.movement_offset[0] -= 1
+                self.flip = False
+
+            elif quadrant == 6:
+                if self.game.maze.border_check(self.pos,(1,0))[0] != self.pos:
+                    self.movement_offset[0] -= 2
+                    self.flip = False
+
+                elif self.game.maze.border_check(self.pos,(0,1))[0] != self.pos:
+                    self.movement_offset[0] += 2
+                    self.flip = True
+
+
+            elif quadrant == 8:
+                if self.game.maze.border_check(self.pos,(-1,0))[0] != self.pos:
+                    self.movement_offset[0] += 2
+                    self.flip = True
+                    
+                elif self.game.maze.border_check(self.pos,(0,-1))[0] != self.pos:
+                    self.movement_offset[0] -= 2
+                    self.flip = False
 
 
 
@@ -766,6 +815,7 @@ class Constructor(Enemy):
         super().update(pos_dict)
         self.flip = False
         
+
 
 class Trapper(Enemy):
     def __init__(self, game, pos, sprite, hp=1, render_offset=[0, 0], e_type=None):
