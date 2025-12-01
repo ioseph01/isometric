@@ -1,4 +1,4 @@
-
+﻿
 from scripts.maze import NEIGHBORS
 from scripts.utils import cell_type, cell_valid, get_cell_type, in_range, sign, to_iso, stable_randint
 from scripts.structures import Enemy_Tile, Player_Tile, Tile, structures_factory
@@ -356,6 +356,11 @@ class Player(Entity):
         elif next_cell.type == 'Enemy_Tile' and self.invincibility <= 0:
             if next_cell.active:
                 return False
+        elif next_cell.type == 'Elevator':
+            if next_cell.time_stopped <= 10 or abs(next_cell.z - self.at.z) > 1:
+                return False
+        if self.at.type == 'Elevator':
+           return abs(next_cell.z - self.at.z) < 2
         return True
 
     def move(self, DX, DY):
@@ -422,83 +427,131 @@ class Player(Entity):
             self.movement_offset[0] = self.movement_offset[0] + DX
             self.movement_offset[1] = self.movement_offset[1] + DY
 
-    def axis_movement(self, QUADRANT, dx, dy):
-        next_coords = None
-        next_movement_offset = self.movement_offset
-        if dx == -2 and QUADRANT == 7:
-            if self.game.maze.trace(self.pos, (self.x + 1, self.y - 1), limit=2) != []:
-                next_coords = [self.x + 1, self.y - 1]
-                next_movement_offset = [9,0]
-        elif dx == 2 and QUADRANT == 5:
-            if self.game.maze.trace(self.pos, (self.x - 1, self.y + 1), limit=2) != []:
-                next_coords = [self.x - 1, self.y + 1]
-                next_movement_offset = [-9,0]
-        elif dy == -1 and QUADRANT == 8:
-            if self.game.maze.trace(self.pos, (self.x - 1, self.y - 1), limit=2) != []:
-                next_coords = [self.x - 1, self.y - 1]
-                next_movement_offset = [0,4]
-        elif dy == 1 and QUADRANT == 6:
-            if self.game.maze.trace(self.pos, (self.x + 1, self.y + 1), limit=2) != []:
-                next_coords = [self.x + 1, self.y + 1]
-                next_movement_offset = [0,-4]
 
-        if next_coords is not None:
-            if self.validate_cell(self.game.maze.maze[next_coords[1]][next_coords[0]]):
+    def axis_movement(self, QUADRANT, dx, dy):
+        # Define movement configurations for each quadrant
+        movements = {
+            (7, -2, 0): ((1, -1), [9, 0]),   # dx == -2 and QUADRANT == 7
+            (5, 2, 0): ((-1, 1), [-9, 0]),   # dx == 2 and QUADRANT == 5
+            (8, 0, -1): ((-1, -1), [0, 4]),  # dy == -1 and QUADRANT == 8
+            (6, 0, 1): ((1, 1), [0, -4])     # dy == 1 and QUADRANT == 6
+        }
+    
+        # Get the movement config for this quadrant/direction
+        key = (QUADRANT, dx, dy)
+        if key not in movements:
+            self.bounce(QUADRANT, dx, dy)
+            return
+    
+        target_offset, movement_offset = movements[key]
+        next_coords = [self.x + target_offset[0], self.y + target_offset[1]]
+    
+        # Check if path is valid
+        path = self.game.maze.trace(self.pos, tuple(next_coords), limit=2)
+        if path:
+            if all(self.validate_cell(self.game.maze.maze[y][x]) for x,y,_ in path):
                 if self.at.type == 'Glass_Tile':
                     self.game.maze.maze[self.y][self.x].deactive()
-
-                self.movement_offset = next_movement_offset
+                self.movement_offset = movement_offset
                 self.pos = next_coords
-        else:
-            self.bounce(QUADRANT,dx,dy)
-    
-   
+                return
+        self.bounce(QUADRANT, dx, dy)
+
     def bounce(self, quadrant, dx, dy):
-        if dx != 0 and dy == 0:
-            if quadrant in (1,2):
-                self.movement_offset[1] -= 1
-            elif quadrant in (3,4):
-                self.movement_offset[1] += 1
+        # Configuration for each quadrant: (offset_index, offset_value, flip_value)
+        # offset_index: 0 for x-axis (movement_offset[0]), 1 for y-axis (movement_offset[1])
+    
+        if dx != 0 and dy == 0:  # Horizontal movement
+            simple_bounces = {
+                1: (1, -1, None), 2: (1, -1, None),
+                3: (1, 1, None),  4: (1, 1, None)
+            }
+        
+            if quadrant in simple_bounces:
+                idx, val, _ = simple_bounces[quadrant]
+                self.movement_offset[idx] += val
             elif quadrant == 5:
-                if self.game.maze.border_check(self.pos,(0, 1))[0] != self.pos:
+                if self.game.maze.border_check(self.pos, (0, 1))[0] != self.pos:
                     self.movement_offset[1] += 1
-                if self.game.maze.border_check(self.pos,(-1,0))[0] != self.pos:
+                if self.game.maze.border_check(self.pos, (-1, 0))[0] != self.pos:
                     self.movement_offset[1] -= 1
-
             elif quadrant == 7:
-                if self.game.maze.border_check(self.pos,(1, 0))[0] != self.pos:
+                if self.game.maze.border_check(self.pos, (1, 0))[0] != self.pos:
                     self.movement_offset[1] += 1
-
-                elif self.game.maze.border_check(self.pos,(0, - 1))[0] != self.pos:
+                elif self.game.maze.border_check(self.pos, (0, -1))[0] != self.pos:
                     self.movement_offset[1] -= 1
-
-
-        elif dx == 0 and dy != 0:
-            if quadrant in (2,3):
-                self.movement_offset[0] += 1
-                self.flip = True
-            elif quadrant in (1,4):
-                self.movement_offset[0] -= 1
-                self.flip = False
-
+    
+        elif dx == 0 and dy != 0:  # Vertical movement
+            simple_bounces = {
+                2: (0, 1, True),  3: (0, 1, True),
+                1: (0, -1, False), 4: (0, -1, False)
+            }
+        
+            if quadrant in simple_bounces:
+                idx, val, flip = simple_bounces[quadrant]
+                self.movement_offset[idx] += val
+                self.flip = flip
             elif quadrant == 6:
-                if self.game.maze.border_check(self.pos,(1,0))[0] != self.pos:
+                if self.game.maze.border_check(self.pos, (1, 0))[0] != self.pos:
                     self.movement_offset[0] -= 2
                     self.flip = False
-
-                elif self.game.maze.border_check(self.pos,(0,1))[0] != self.pos:
+                elif self.game.maze.border_check(self.pos, (0, 1))[0] != self.pos:
                     self.movement_offset[0] += 2
                     self.flip = True
-
-
             elif quadrant == 8:
-                if self.game.maze.border_check(self.pos,(-1,0))[0] != self.pos:
+                if self.game.maze.border_check(self.pos, (-1, 0))[0] != self.pos:
                     self.movement_offset[0] += 2
                     self.flip = True
-                    
-                elif self.game.maze.border_check(self.pos,(0,-1))[0] != self.pos:
+                elif self.game.maze.border_check(self.pos, (0, -1))[0] != self.pos:
                     self.movement_offset[0] -= 2
                     self.flip = False
+   
+    # def bounce(self, quadrant, dx, dy):
+    #     if dx != 0 and dy == 0:
+    #         if quadrant in (1,2):
+    #             self.movement_offset[1] -= 1
+    #         elif quadrant in (3,4):
+    #             self.movement_offset[1] += 1
+    #         elif quadrant == 5:
+    #             if self.game.maze.border_check(self.pos,(0, 1))[0] != self.pos:
+    #                 self.movement_offset[1] += 1
+    #             if self.game.maze.border_check(self.pos,(-1,0))[0] != self.pos:
+    #                 self.movement_offset[1] -= 1
+
+    #         elif quadrant == 7:
+    #             if self.game.maze.border_check(self.pos,(1, 0))[0] != self.pos:
+    #                 self.movement_offset[1] += 1
+
+    #             elif self.game.maze.border_check(self.pos,(0, - 1))[0] != self.pos:
+    #                 self.movement_offset[1] -= 1
+
+
+    #     elif dx == 0 and dy != 0:
+    #         if quadrant in (2,3):
+    #             self.movement_offset[0] += 1
+    #             self.flip = True
+    #         elif quadrant in (1,4):
+    #             self.movement_offset[0] -= 1
+    #             self.flip = False
+
+    #         elif quadrant == 6:
+    #             if self.game.maze.border_check(self.pos,(1,0))[0] != self.pos:
+    #                 self.movement_offset[0] -= 2
+    #                 self.flip = False
+
+    #             elif self.game.maze.border_check(self.pos,(0,1))[0] != self.pos:
+    #                 self.movement_offset[0] += 2
+    #                 self.flip = True
+
+
+    #         elif quadrant == 8:
+    #             if self.game.maze.border_check(self.pos,(-1,0))[0] != self.pos:
+    #                 self.movement_offset[0] += 2
+    #                 self.flip = True
+                    
+    #             elif self.game.maze.border_check(self.pos,(0,-1))[0] != self.pos:
+    #                 self.movement_offset[0] -= 2
+    #                 self.flip = False
 
 
 
@@ -735,9 +788,11 @@ class Converter(Enemy):
                 for tile in self.at.adjacent_cells | {self.at}:
                     if tile.type == 'Tile':
                         if tile.player_tile:
-                            self.game.maze.maze[tile.y][tile.x] = Enemy_Tile(self.game.maze, tile.z, tile.x, tile.y, cooldown=random.randint(1,10) * 10)
+                            self.game.maze.maze[tile.y][tile.x] = Enemy_Tile(self.game.maze, tile.z, tile.x, tile.y, cooldown=random.randint(15,20))
                             x_, y_ = self.game.maze.maze[tile.y][tile.x].render_pos
                             self.game.maze.static_surface.blit(self.game.maze.maze[tile.y][tile.x].cutout,(x_ - ox, y_ - oy))
+                            self.game.maze.animated_tiles.append((tile.x,tile.y))
+                            self.game.maze.animated_tiles.sort()
 
                 self.hp = 0
                 return
@@ -826,6 +881,8 @@ class Trapper(Enemy):
     def lay_trap(self):
         if len(self.game.traps) < self.capcacity and abs(self.x - self.game.player.x) < 10 and abs(self.y - self.game.player.y) < 10:
             if (self.x, self.y) not in self.game.traps and self.at.type in ('Tile', 'Temp_Tile', 'Elevator'):
+                if self.at.type == 'Tile' and self.at.player_tile:
+                    return
                 self.game.traps[(self.x,self.y)] = Trap(self.game, self.pos, self.game.assets['Trap'])
 
     def update(self, pos_dict):

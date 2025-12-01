@@ -1,19 +1,37 @@
 from pygame.locals import *
 from scripts.game import Game
-from scripts.structures import Tile
-from scripts.maze import Maze
+from scripts.text import Font
 import random
 import pygame
 import sys
+from scripts.utils import load_image, load_images
 
-from scripts.utils import load_image
 
+class Controller:
+    def __init__(self):
+        self.mode = 'Main_Menu'
+        self.windows = {
+            # 'Game': Game(self),
+            'Main_Menu': MainMenu(self),
+            'Options': Options(self),
+            'Stats': Stats(self),
+            'Pause': Pause(self),
+        }
+        self.sfx = True
+        self.font = Font("small_font.png")
+        self.screen_rect = pygame.Rect(0,0,720,540)
+
+    @property
+    def current(self):
+        return self.windows[self.mode]
+    
+        
 class MainMenu:
     def __init__(self, controller):
         self.controller = controller
-        self.options = ["Start Game", "Options", "Quit"]
+        self.options = ["Start Game", "Controls"]
         self.selected = 0 
-        self.logo = load_image("logo.png")
+        self.logo = load_image("logo (2).png")
 
     def update(self, events, screen):
         self.draw(screen)
@@ -30,22 +48,23 @@ class MainMenu:
         option = self.options[index]
         if option == "Start Game":
             self.controller.windows['Game'] = Game(self.controller)
+            # self.controller.windows['Game'] = Game(self.controller)
             self.controller.mode = 'Game'
-        elif option == "Options":
+        if option == "Controls":
             self.controller.mode = 'Options'
-        elif option == "Quit":
-            pygame.quit()
-            sys.exit()
+        # elif option == "Quit":
+        #     pygame.quit()
+        #     sys.exit()
 
     def draw(self, surface):
         surface.fill((30, 30, 60))
-        x = 35 + (640 - self.logo.get_width()) // 2
-        surface.blit(self.logo, (x,40))
-        padding, spacing = 200, 80
+        x = (720 - self.logo.get_width()) // 2
+        surface.blit(self.logo, (x,120))
+        padding, spacing = 240, 80
         for i, option in enumerate(self.options):
             y = padding + i * spacing
             text_width = self.controller.font.get_width(option)
-            x = (640 - text_width) // 2
+            x = (720 - text_width) // 2
             self.controller.font.render(surface, option, (x, y))  # Aligned text
 
             if i == self.selected:
@@ -62,8 +81,8 @@ class Options:
             "",
             "CONTROLS:",
             "WASD or Arrow Keys - Move",
-            "I - Lay an egg (Needs 10 or more gems)",
-            "O - Teleport to egg",
+            "I/C - Lay an egg (Needs 10 or more gems)",
+            "O/V - Teleport to egg",
             "",
             "Press P to pause",
             "Press ESC/Q to return to Main Menu"
@@ -73,7 +92,6 @@ class Options:
         for event in events:
             if event.type == KEYDOWN and event.key in [K_ESCAPE, K_q]:
                 self.controller.mode = 'Main_Menu'
-
         self.draw(screen)
 
     def draw(self, surface):
@@ -85,7 +103,7 @@ class Options:
         for i, line in enumerate(self.lines):
             if i < 4:
                 text_width = self.controller.font.get_width(line)
-                x = (640 - text_width) // 2
+                x = (720 - text_width) // 2
             else:
                 x = 60
             y = start_y + i * 32
@@ -114,8 +132,6 @@ class Stats:
             if event.type == KEYDOWN:
                 if self.lines >= 6:
                     self.controller.mode = 'Main_Menu'
-                else:
-                    self.lines = max(5, self.lines + 1)
                 
         self.draw(screen)
 
@@ -128,5 +144,67 @@ class Stats:
                 break
             y = padding + i * spacing
             text_width = self.controller.font.get_width(text)
-            x = (640 - text_width) // 2
+            x = (720 - text_width) // 2
             self.controller.font.render(surface, text, (x, y))  # Aligned text
+
+
+class Pause:
+    def __init__(self, controller):
+        self.controller = controller
+        self.options = ["Resume", "SFX: ON", "MUSIC: ON", "Quit"]
+        self.selected = 0 
+        self.base = pygame.Surface((270, 200), pygame.SRCALPHA)
+        self.base.fill((0, 0, 0, 200))  # semi-transparent fill
+        self.rect = pygame.Rect(10,10,250,180)
+        pygame.draw.rect(self.base, (255, 255, 255), self.rect, width=5)  # white 2px border
+
+
+
+    def activate_option(self, selected):
+        if selected == 'Quit':
+            self.controller.windows['Game'].quit()
+        elif selected == 'Resume':
+            self.controller.mode = 'Game'
+        elif selected == 'SFX: ON':
+            self.controller.sfx = not self.controller.sfx
+            self.options[1] = 'SFX: OFF'
+        elif selected == 'SFX: OFF':
+            self.controller.sfx = not self.controller.sfx
+            self.options[1] = 'SFX: ON'
+        elif selected == 'MUSIC: ON':
+            pygame.mixer.music.stop()
+            self.options[2] = 'MUSIC: OFF'
+        elif selected == 'MUSIC: OFF':
+            pygame.mixer.music.load('data/music.mp3')
+            pygame.mixer.music.play(-1)
+            self.options[2] = 'MUSIC: ON'
+
+            
+
+    def update(self, events, screen):
+
+        for event in events:
+            if event.type == KEYDOWN:
+                if event.key == K_DOWN:
+                    self.selected = (self.selected + 1) % len(self.options)
+                elif event.key == K_UP:
+                    self.selected = (self.selected - 1) % len(self.options)
+                elif event.key in (K_RETURN, K_SPACE):
+                    self.activate_option(self.options[self.selected])
+                elif event.key == K_p:
+                    self.controller.mode = 'Game'
+
+        self.draw(screen)
+
+    def draw(self,surface):
+        surface.blit(self.controller.windows['Game'].paused_surface, (0,0))
+        surface.blit(self.base, ((720 - 270) // 2,150))
+        padding, spacing = 180, 40
+        for i, option in enumerate(self.options):
+            y = padding + i * spacing
+            text_width = self.controller.font.get_width(option)
+            x = (720 - text_width) // 2
+            self.controller.font.render(surface, option, (x, y))  # Aligned text
+
+            if i == self.selected:
+                self.controller.font.render(surface, ">", (x - 20, y))  # Draw selector at fixed position
