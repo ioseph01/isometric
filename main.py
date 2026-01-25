@@ -19,11 +19,13 @@ class Controller:
             # 'TestWindow': TestWindow(self),
         }
         self.font = Font("small_font.png")
+        self.screen_rect = pygame.Rect(0,0,720,540)
 
     @property
     def current(self):
         return self.windows[self.mode]
     
+
 
 async def main():
     pygame.init()
@@ -40,6 +42,9 @@ async def main():
                 running = False
         
         controller.current.update(events, screen)
+        
+        fps = int(clock.get_fps())
+        controller.font.render(screen, f"FPS:{fps}",(10,510))
         pygame.display.flip()
         await asyncio.sleep(0)  
         clock.tick(60)

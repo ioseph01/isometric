@@ -388,7 +388,7 @@ class Maze:
 
     
 
-    def draw_map(self, screen, offset=(0,0), entities={}, border_layer=None, paused=False):
+    def draw_map(self, screen, offset=(0,0), entities={}, border_layer=None, rect=None, paused=False):
         ''' Maze render function '''
         counter = 0
         for y in range(self.h):
@@ -402,16 +402,16 @@ class Maze:
                     if not paused and self.w*self.h <= self.render_counter:
                         tile.update()
                     wall_height = self.WALL_HEIGHT * 2 if self.WALL_HEIGHT is not None else (1+(x*y*(tile.z1 + 1))%4) * 4
-                    tile.render(screen, wall_height, offset, self.WALL_SPACING)
+                    tile.render(screen, wall_height, offset, self.WALL_SPACING, rect)
                     if (x,y) in entities:
                         for e in entities[(x,y)]:
-                            e.render(screen, offset)
+                            e.render(screen, offset, rect)
                             
                     for nx, ny in tile.back_neighbors:
                         if (nx,ny) in entities:
                             if self.maze[ny][nx].z <= tile.z:
                                 for entity in entities[(nx,ny)]:
-                                    entity.render(screen, offset)
+                                    entity.render(screen, offset,rect)
                 counter += 1
                     
 
